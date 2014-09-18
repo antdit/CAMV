@@ -33,13 +33,20 @@ global HPO3;
 global CO2;
 global SOCH4;
 
-% Create iTRAQ Fragments
+% Create iTRAQ Fragments - UPDATED
 if iTRAQ_type == 8
     iTRAQ_masses = [113.11, 114.11, 115.11, 116.11, 117.11, 118.11, 119.11, 121.12];
     iTRAQ_names = {'iTRAQ 113', 'iTRAQ 114', 'iTRAQ 115', 'iTRAQ 116', 'iTRAQ 117', 'iTRAQ 118', 'iTRAQ 119', 'iTRAQ 121'};
 elseif iTRAQ_type == 4
     iTRAQ_masses = [114.11, 115.11, 116.11, 117.11];
     iTRAQ_names = {'iTRAQ 114', 'iTRAQ 115', 'iTRAQ 116', 'iTRAQ 117'};
+elseif iTRAQ_type == 10
+    iTRAQ_masses = [126.128, 127.125, 127.131, 128.128, 128.134, 129.131, 129.138, 130.135, 130.141, 131.138];
+    iTRAQ_names = {'TMT10 126', 'TMT10 127N', 'TMT10 127C', 'TMT10 128N', 'TMT10 128C', 'TMT10 129N', 'TMT10 129C', 'TMT10 130N', 'TMT10 130C', 'TMT10 131'};
+elseif iTRAQ_type == 6
+    iTRAQ_masses = [126.128, 127.125, 127.131, 128.128, 128.134, 129.131, 129.138, 130.135, 130.141, 131.138];
+    iTRAQ_names = {'TMT10 126', 'TMT10 127N', 'TMT10 127C', 'TMT10 128N', 'TMT10 128C', 'TMT10 129N', 'TMT10 129C', 'TMT10 130N', 'TMT10 130C', 'TMT10 131'};
+    
 else
     iTRAQ_masses = [];
     iTRAQ_names = {};
@@ -55,6 +62,12 @@ if iTRAQ_type == 4
     K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) + iTRAQ - exact_mass(1,0,0,0,0,0);
 elseif iTRAQ_type == 8
     iTRAQ = 304.2054 + exact_mass(1,0,0,0,0,0);
+    n_term = iTRAQ;
+    % Lysine
+    K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) + iTRAQ - exact_mass(1,0,0,0,0,0);
+% TMT 10plex added here
+elseif (iTRAQ_type == 10 || iTRAQ_type == 6)
+    iTRAQ = 229.1629 + exact_mass(1,0,0,0,0,0);
     n_term = iTRAQ;
     % Lysine
     K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) + iTRAQ - exact_mass(1,0,0,0,0,0);

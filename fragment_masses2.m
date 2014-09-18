@@ -63,9 +63,11 @@ for i = 1:length(seq)
     
     % Return more than just parent ions
     if prec_only == 0
-        fragments{i}.all = [fragments{i}.all, precursor];
+        
         precursor_names = {'MH^{+1}' 'MH^{+2}' 'MH^{+3}' 'MH^{+4}' 'MH^{+5}'};
-        fragments{i}.all_names = [fragments{i}.all_names, precursor_names];
+        
+        fragments{i}.all = [fragments{i}.all, precursor(1:min(5,charge_state))];
+        fragments{i}.all_names = [fragments{i}.all_names, precursor_names(1:min(5,charge_state))];
         
         
         [out_mass, out_names] = b_losses(charge_state, mass_fragments, {'NH_3', 'H_2O', 'H_3PO_4', 'SOCH_4'}, [NH3; H2O; H3PO4; SOCH4], [ones(1,length(mass_fragments)); ones(1,length(mass_fragments)); loc_st'; loc_m']);
@@ -103,20 +105,26 @@ for i = 1:length(seq)
         loc_st = find_loc(seq{i}(end:-1:1),'[st]');
         loc_y = find_loc(seq{i}(end:-1:1),'y');
         
-        [out_mass, out_names] = y_losses(charge_state, mass_fragments, {'NH_3', 'H_2O', 'H_3PO_4', 'SOCH4'}, [NH3; H2O; H3PO4; SOCH4], [ones(1,length(mass_fragments)); ones(1,length(mass_fragments)); loc_st'; loc_m']);
+        [out_mass, out_names] = y_losses(charge_state, mass_fragments, {'NH_3', 'H_2O', 'H_3PO_4', 'SOCH_4'}, [NH3; H2O; H3PO4; SOCH4], [ones(1,length(mass_fragments)); ones(1,length(mass_fragments)); loc_st'; loc_m']);
         fragments{i}.all = [fragments{i}.all, out_mass];
         fragments{i}.all_names = [fragments{i}.all_names, out_names];
         
-        [out_mass, out_names] = y_losses(charge_state, mass_fragments, {'NH_3', 'H_2O', 'HPO_3', 'SOCH4'}, [NH3; H2O; HPO3; SOCH4], [ones(1,length(mass_fragments)); ones(1,length(mass_fragments)); loc_y'; loc_m']);
+        [out_mass, out_names] = y_losses(charge_state, mass_fragments, {'NH_3', 'H_2O', 'HPO_3', 'SOCH_4'}, [NH3; H2O; HPO3; SOCH4], [ones(1,length(mass_fragments)); ones(1,length(mass_fragments)); loc_y'; loc_m']);
         fragments{i}.all = [fragments{i}.all, out_mass];
         fragments{i}.all_names = [fragments{i}.all_names, out_names];
         
-        [out_mass, out_names] = y_losses(charge_state, mass_fragments, {'NH_3', 'H_2O', 'HPO_3-H_2O', 'SOCH4'}, [NH3; H2O; H3PO4; SOCH4], [ones(1,length(mass_fragments)); ones(1,length(mass_fragments)); loc_y'; loc_m']);
+        [out_mass, out_names] = y_losses(charge_state, mass_fragments, {'NH_3', 'H_2O', 'HPO_3-H_2O', 'SOCH_4'}, [NH3; H2O; H3PO4; SOCH4], [ones(1,length(mass_fragments)); ones(1,length(mass_fragments)); loc_y'; loc_m']);
         fragments{i}.all = [fragments{i}.all, out_mass];
         fragments{i}.all_names = [fragments{i}.all_names, out_names];
         
         
         % Other Peaks
+        
+        % Internal Fragments
+        [if_names, if_masses] = internal_fragments(seq{i});
+        fragments{i}.all = [fragments{i}.all, if_masses];
+        fragments{i}.all_names = [fragments{i}.all_names, if_names];
+        
         
         % Phosphotyrosine peak
         if ~isempty(regexp(seq,'y'))
@@ -158,7 +166,8 @@ function [out_mass, out_name] = b_losses(charge_state, mass_fragments, loss_name
         % loc = n-by-length matrix where each row is a vector produced by
         %       find_loc for the corresponding loss
         
-        global CO2;
+        % CO loss for a-ion
+        CO = exact_mass(0, 1, 0, 1, 0, 0);
         out_mass = [];
         out_name = {};                
         
@@ -179,7 +188,7 @@ function [out_mass, out_name] = b_losses(charge_state, mass_fragments, loss_name
                 end
             end
             temp = temp';
-            out_mass = [out_mass, (mass_fragments(i) - temp * loss)', ((mass_fragments(i) - temp * loss + 1)/2)', (mass_fragments(i) -temp * loss - CO2)', ((mass_fragments(i) - temp * loss - CO2 + 1)/2)'];
+            out_mass = [out_mass, (mass_fragments(i) - temp * loss)', ((mass_fragments(i) - temp * loss + 1)/2)', (mass_fragments(i) -temp * loss - CO)', ((mass_fragments(i) - temp * loss - CO + 1)/2)'];
             
             for j = 1:length(temp)
                 temp_name = [];
@@ -238,7 +247,7 @@ function [out_mass, out_name] = b_losses(charge_state, mass_fragments, loss_name
             end
             
             if charge_state >= 3
-                out_mass = [out_mass, ((mass_fragments(i) - temp * loss + 2)/3)', ((mass_fragments(i) - temp * loss - CO2 + 2)/3)'];
+                out_mass = [out_mass, ((mass_fragments(i) - temp * loss + 2)/3)', ((mass_fragments(i) - temp * loss - CO + 2)/3)'];
                 for j = 1:length(temp)
                     temp_name = [];
                     for k = 1:length(loss_name)
@@ -267,7 +276,7 @@ function [out_mass, out_name] = b_losses(charge_state, mass_fragments, loss_name
                 end
             end
             if charge_state >= 4
-                out_mass = [out_mass, ((mass_fragments(i) - temp * loss + 3)/4)', ((mass_fragments(i) - temp * loss - CO2 + 3)/4)'];
+                out_mass = [out_mass, ((mass_fragments(i) - temp * loss + 3)/4)', ((mass_fragments(i) - temp * loss - CO + 3)/4)'];
                 for j = 1:length(temp)
                     temp_name = [];
                     for k = 1:length(loss_name)

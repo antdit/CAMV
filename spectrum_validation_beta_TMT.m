@@ -2,11 +2,26 @@ function spectrum_validation_beta()
 import javax.swing.*
 import javax.swing.tree.*;
 
+RAW_filename = '';
+RAW_path = '';
+RAW_path_ns = '';
+XML_filename = '';
+XML_path = '';
+XML_path_ns = '';
+OUT_path = '';
+OUT_path_ns = '';
+filename = '';
+SL_path = '';
+SL_filename = '';
+
+% msconvert_full_path = 'C:\Users\Tim\Desktop\Lab\Data\Code\SpectrumValidation\MATLAB_GUI\New\ProteoWizard\"ProteoWizard 3.0.4323"\msconvert';
+msconvert_full_path = 'ProteoWizard\"ProteoWizard 3.0.4323"\msconvert';
+
 data = {};
 mtree = 0;
 jtree = 0;
 prev_node = '';
-filename = '';
+
 
 % iTRAQ_type = 8;
 iTRAQType = {};
@@ -18,15 +33,25 @@ SILAC_R10 = false;
 SILAC_K6 = false;
 SILAC_K8 = false;
 
-CID_tol = 1e-3;
-HCD_tol = 1e-5;
+CID_tol = 1000;
+HCD_tol = 10;
 
 accept_list = {};
 maybe_list = {};
 reject_list = {};
 
+new_accept_list = {};
+new_maybe_list = {};
+
 cont_thresh = 100;
 cont_window = 1;
+
+b_names_keep = {};
+y_names_keep = {};
+
+load_settings;
+
+max_num_peaks = 50;         % Maximum number of peaks in MS2 before excluded
 
 % Tree
 h = figure('pos',[150,100,1200,600]);
@@ -88,7 +113,11 @@ handle_file = uicontrol('Style', 'pushbutton', 'String', 'Get File','Position', 
 handle_file_continue = uicontrol('Style', 'pushbutton', 'String', 'Load Session','Position', [300 20 75 20],'Callback', @load_session);
 handle_file_save = uicontrol('Style', 'pushbutton', 'String', 'Save Session','Position', [375 20 75 20],'Callback', @save_session,'Enable', 'off');
 
+% handle_settings = uicontrol('Style', 'pushbutton', 'String', 'Change Settings', 'Position', [10, 150, 100, 20], 'Callback', @change_settings);    
+
 handle_batch_process = uicontrol('Style', 'pushbutton', 'String', 'Batch Process', 'Position', [10, 100, 100, 20], 'Callback', @batch_process);    
+
+
 
 ax0 = axes('Position', [0,0,1,1], 'Visible', 'off');
 h1 = text(500,20, '', 'Units', 'pixels', 'Interpreter', 'none');
@@ -113,18 +142,105 @@ text(.5,1.1,'Precursor', 'HorizontalAlignment', 'center');
 ax3 = axes('Position', [.84,.125,.14,.25], 'TickDir', 'out', 'box', 'off','Visible','off');
 % text(.5,1.1,'iTRAQ', 'HorizontalAlignment', 'center');
 
+zoom_is_clicked = 0;
+start_zoom = 0;
+
+    % Zoom in upon user clicks to the MS2 window
+    %
+    % Two single clicks define boundaries of zoom window
+    % Double click zooms out
+    function zoom_MS2(~,~)           
+        nodes = mtree.getSelectedNodes;
+        node = nodes(1);
+        
+        scan_curr = regexp(node.getValue,'\.','split');        
+        
+        if strcmp(get(gcf,'SelectionType'),'open')
+            % Double click zooms out
+            cla(ax1);
+            cla(ax1_assign);
+            cla(ax1_info);            
+            
+            axes(ax1);
+            set(gca, 'TickDir', 'out', 'box', 'off');
+            stem(data{str2num(scan_curr{1})}.scan_data(:,1),data{str2num(scan_curr{1})}.scan_data(:,2),'Marker', 'none');
+            
+            axes(ax1_assign)
+            display_ladder(str2num(scan_curr{1}),str2num(scan_curr{2}));
+            plot_assignment(str2num(scan_curr{1}),str2num(scan_curr{2}));
+            
+            axes(ax1_info)
+            text(0.01, 0.95, ['Scan Number: ', num2str(data{str2num(scan_curr{1})}.scan_number)]);
+            
+            set(ax1, 'ButtonDownFcn', @zoom_MS2);
+            zoom_is_clicked = 0;
+        else
+            if zoom_is_clicked
+%                 print_now('');
+                % End range selection for zoom
+                temp = get(ax1,'CurrentPoint');
+                end_zoom = temp(1,1);
+                
+                if start_zoom > end_zoom
+                   temp = end_zoom;
+                   end_zoom = start_zoom;
+                   start_zoom = temp;
+                end
+                
+                % Find indicies of start and end of user selected zoom
+                % window
+                x1 = find(data{str2num(scan_curr{1})}.scan_data(:,1) > start_zoom);
+                x2 = find(data{str2num(scan_curr{1})}.scan_data(:,1) < end_zoom);
+                
+                x_used = intersect(x1,x2);
+                
+                cla(ax1);
+                cla(ax1_assign);
+                cla(ax1_info);
+                                                
+                set(ax1, 'XLim', [start_zoom, end_zoom]);
+                                               
+                axes(ax1);
+                set(gca, 'TickDir', 'out', 'box', 'off');
+                stem(data{str2num(scan_curr{1})}.scan_data(x_used,1),data{str2num(scan_curr{1})}.scan_data(x_used,2),'Marker', 'none');
+                
+                axes(ax1_assign)
+                display_ladder(str2num(scan_curr{1}),str2num(scan_curr{2}));
+                plot_assignment(str2num(scan_curr{1}),str2num(scan_curr{2}));
+                
+                % Scale y-axis for zoomed window
+                set(ax1, 'YLim', [0, 1.25*max(data{str2num(scan_curr{1})}.scan_data(x_used,2))]);                                
+                
+                axes(ax1_info)
+                text(0.01, 0.95, ['Scan Number: ', num2str(data{str2num(scan_curr{1})}.scan_number)]);
+                
+                set(ax1, 'ButtonDownFcn', @zoom_MS2);
+                zoom_is_clicked = 0;
+                
+            else
+%                 print_now('clicked');
+                % Begin range selection for zoom.
+                temp = get(ax1,'CurrentPoint');
+                start_zoom = temp(1,1);
+                zoom_is_clicked = 1;
+            end
+        end
+    end
+
 % Precursor Contamination
 handle_prec_cont = uicontrol('Style','checkbox','String','Exclude Precursor Contamination?',...
-    'Position',[10,500,200,20],...
+    'Position',[10,500,200,20],...    
     'Callback',@prec_cont_checked);
 
 handle_threshold = uicontrol('Style','edit',...
     'Position',[30,480,50,20],...
-    'Enable','off');
+    'Enable','off',...
+    'string', num2str(cont_thresh));
 
 handle_window = uicontrol('Style','edit',...
     'Position',[30,460,50,20],...
-    'Enable','off');
+    'Enable','off',...
+    'string', num2str(cont_window));
 
     function prec_cont_checked(hObject,event)
         if get(handle_prec_cont,'Value')
@@ -137,12 +253,26 @@ handle_window = uicontrol('Style','edit',...
     end
 
 % Scan Number List
-handle_scan_number_list = uicontrol('Style','checkbox','String','Use scan list (XLS)?',...
-    'Position',[10,400,200,20]);   
+% handle_scan_number_list = uicontrol('Style','checkbox','String','Use scan list (XLS)?','Position',[10,400,200,20]);   
 
 axes(ax0);
 text(80,490, '%', 'Units', 'pixels', 'Interpreter', 'none');
 text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
+
+
+% MS2 Tolerances
+handle_CID_tol = uicontrol('Style','edit',...
+    'Position',[100,350,50,20],...
+    'Enable','on',...
+    'string', '1000');
+text(10,360,'CID Tol.(ppm)', 'Units', 'pixels', 'Interpreter', 'none');
+
+handle_HCD_tol = uicontrol('Style','edit',...
+    'Position',[100,325,50,20],...
+    'Enable','on', ...
+    'string', '10');
+text(10,335,'HCD Tol.(ppm)', 'Units', 'pixels', 'Interpreter', 'none');
+
 
 % Handle buttonclick events on tree
     function accept(hObject, event)
@@ -156,7 +286,7 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         scan = id{1};
         choice = id{2};
         
-        data{str2num(scan)}.fragments{str2num(choice)}.status = 1;
+        data{str2num(scan)}.fragments{str2num(choice)}.status = 1;                
         
         found = 0;
         for i = 1:length(accept_list)
@@ -270,12 +400,12 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
 % Print plots for scans in "accept" list and write XLS with iTRAQ data
     function print_accepted(hObject, event)
         if length(accept_list) > 0
-            if exist(['output\', filename,'\accept']) == 0
+            if exist([OUT_path, filename,'\accept']) == 0
                 % Make output directory
-                mkdir(['output\', filename,'\accept']);
+                mkdir([OUT_path, filename,'\accept']);
             else
                 % Remove files that are no longer accepted
-                dir_contents = dir(['output\', filename,'\accept']);
+                dir_contents = dir([OUT_path, filename,'\accept']);
                 for i = 3:length(dir_contents)
                     found = 0;
                     for j = 1:length(accept_list)
@@ -300,7 +430,7 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                         end                        
                     end
                     if ~found
-                        delete(['output\', filename,'\accept\',dir_contents(i).name]);
+                        delete([OUT_path, filename,'\accept\',dir_contents(i).name]);
                     end
                 end
             end
@@ -322,7 +452,7 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                 fig_name = regexprep(fig_name, ':', '-');
                 fig_name = regexprep(fig_name, '\.', '');
                 
-                if ~exist(['output\',filename,'\accept\',fig_name,'.pdf'],'file')
+                if ~exist([OUT_path,filename,'\accept\',fig_name,'.pdf'],'file')
                     print_pdf(scan, id, ['accept\',fig_name]);
                 end
                 
@@ -334,20 +464,20 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
             end                
         else
             warndlg('No peptide identifications have been selected.','Empty List');
-            delete(['output\', filename,'\accept\*.pdf']);
-            delete(['output\', filename,'\*.xls'])
+            delete([OUT_path, filename,'\accept\*.pdf']);
+            delete([OUT_path, filename,'\*.xls'])
         end
     end
 
 % Print plots for scans in "maybe" list
     function print_maybe(hObject, event)
         if length(maybe_list) > 0
-            if exist(['output\', filename,'\maybe']) == 0
+            if exist([OUT_path, filename,'\maybe']) == 0
                 % Make output directory
-                mkdir(['output\', filename,'\maybe']);
+                mkdir([OUT_path, filename,'\maybe']);
             else
                 % Remove files that are no longer accepted
-                dir_contents = dir(['output\', filename,'\maybe']);
+                dir_contents = dir([OUT_path, filename,'\maybe']);
                 for i = 3:length(dir_contents)
                     found = 0;
                     for j = 1:length(maybe_list)
@@ -372,7 +502,7 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                         end                        
                     end
                     if ~found
-                        delete(['output\', filename,'\maybe\',dir_contents(i).name]);
+                        delete([OUT_path, filename,'\maybe\',dir_contents(i).name]);
                     end
                 end
             end
@@ -393,20 +523,20 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                 fig_name = regexprep(fig_name, ':', '-');
                 fig_name = regexprep(fig_name, '\.', '');
                 
-                if ~exist(['output\',filename,'\maybe\',fig_name,'.pdf'],'file')
+                if ~exist([OUT_path,filename,'\maybe\',fig_name,'.pdf'],'file')
                     print_pdf(scan, id, ['maybe\',fig_name]);
                 end
             end            
         else
             warndlg('No peptide identifications have been selected.','Empty List');
-            delete(['output\', filename,'\maybe\*.pdf']);
+            delete([OUT_path, filename,'\maybe\*.pdf']);
         end
     end
 
 % Used to make publication quality tiff's of single MS2 scans
     function print_ms2(hObject, event)
         nodes = mtree.getSelectedNodes;
-        node = nodes(1);               
+        node = nodes(1);
         
         scan_curr = regexp(node.getValue,'\.','split');
         scan = str2num(scan_curr{1});
@@ -417,8 +547,8 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         charge_state = data{scan}.pep_exp_z;
         scan_number = data{scan}.scan_number;
         
-%         b_ions = data{scan}.fragments{id}.b_ions;
-%         y_ions = data{scan}.fragments{id}.y_ions;
+        %         b_ions = data{scan}.fragments{id}.b_ions;
+        %         y_ions = data{scan}.fragments{id}.y_ions;
         
         b_used = zeros(length(seq),1);
         y_used = zeros(length(seq),1);
@@ -438,22 +568,22 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         
         fig2 = figure('pos', [100 100 800 400]);
         set(gca,'Visible','off');
-%         % Print PDF friendly scan information and ladder
-%         text(-40, 665, protein, 'Units', 'pixels', 'FontSize', 10);
-%         text(-40, 650, ['Charge State: +', num2str(charge_state)], 'Units', 'pixels', 'FontSize', 10);
-%         text(-40, 635, ['Scan Number: ', num2str(scan_number)], 'Units', 'pixels', 'FontSize', 10);
-%         text(-40, 620, ['File Name: ', filename, '.raw'], 'Units', 'pixels', 'FontSize', 10, 'Interpreter', 'none');
+        %         % Print PDF friendly scan information and ladder
+        %         text(-40, 665, protein, 'Units', 'pixels', 'FontSize', 10);
+        %         text(-40, 650, ['Charge State: +', num2str(charge_state)], 'Units', 'pixels', 'FontSize', 10);
+        %         text(-40, 635, ['Scan Number: ', num2str(scan_number)], 'Units', 'pixels', 'FontSize', 10);
+        %         text(-40, 620, ['File Name: ', filename, '.raw'], 'Units', 'pixels', 'FontSize', 10, 'Interpreter', 'none');
         
         x_start = -40;
         y_start = 325;
         
         num_font_size = 5;
         
-%         space_x = 20;
+        %         space_x = 20;
         space_x = 10;
-%         space_y = 20;
+        %         space_y = 20;
         
-%         text(x_start, y_start + space_y, num2str(b_ions(1)), 'Units', 'pixels', 'HorizontalAlignment', 'Center', 'FontSize', num_font_size);
+        %         text(x_start, y_start + space_y, num2str(b_ions(1)), 'Units', 'pixels', 'HorizontalAlignment', 'Center', 'FontSize', num_font_size);
         text(x_start, y_start, seq(1), 'Units', 'pixels', 'HorizontalAlignment', 'Center')
         
         prev = x_start;
@@ -469,27 +599,27 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                 text(prev + space_x, y_start, '^{\rceil}_{ \lfloor}', 'Units', 'pixels', 'FontSize', 18, 'HorizontalAlignment', 'Center');
             end
             
-%             if i < length(seq)
-%                 text(prev + 2*space_x, y_start + space_y, num2str(b_ions(i)), 'Units', 'pixels', 'HorizontalAlignment', 'Center', 'FontSize', num_font_size);
-%             end
+            %             if i < length(seq)
+            %                 text(prev + 2*space_x, y_start + space_y, num2str(b_ions(i)), 'Units', 'pixels', 'HorizontalAlignment', 'Center', 'FontSize', num_font_size);
+            %             end
             text(prev + 2*space_x, y_start, seq(i), 'Units', 'pixels', 'HorizontalAlignment', 'Center');
-%             text(prev + 2*space_x, y_start - space_y, num2str(y_ions(end-i+1)), 'Units', 'pixels', 'HorizontalAlignment', 'Center', 'FontSize', num_font_size);
+            %             text(prev + 2*space_x, y_start - space_y, num2str(y_ions(end-i+1)), 'Units', 'pixels', 'HorizontalAlignment', 'Center', 'FontSize', num_font_size);
             prev = prev + 2*space_x;
         end
         
         
-        ax1_pdf = axes('Position', [.12,.15,.8,.65], 'TickDir', 'out', 'box', 'off');       
-      
-        axes(ax1_pdf);        
-        stem(data{scan}.scan_data(:,1),data{scan}.scan_data(:,2),'Marker', 'none');                
+        ax1_pdf = axes('Position', [.12,.15,.8,.65], 'TickDir', 'out', 'box', 'off');
+        
+        axes(ax1_pdf);
+        stem(data{scan}.scan_data(:,1),data{scan}.scan_data(:,2),'Marker', 'none');
         plot_assignment(scan,id);
-        set(gca, 'TickDir', 'out', 'box', 'off');        
+        set(gca, 'TickDir', 'out', 'box', 'off');
         ylim([0,1.25*max(data{scan}.scan_data(:,2))]);
         
         x_start = 0.95 * data{scan}.fragments{id}.validated{1,1};
         x_end = 1.05 * data{scan}.fragments{id}.validated{end,1};
         
-        xlim([x_start,x_end]);                
+        xlim([x_start,x_end]);
         xlabel('m/z', 'Fontsize', 20);
         ylabel('Intensity', 'Fontsize', 20);
         
@@ -498,120 +628,331 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         close(fig2);
     end
 
-% Process multiple files
-    function batch_process(~,~)
-        cd('input');
-        [names, path] = uigetfile({'*.raw','RAW Files'}, 'MultiSelect', 'on');
-        cd('..');
-        if strcmp(class(names),'char')
-            filename = names;
-            filename = regexprep(filename,'.RAW','');
-            filename = regexprep(filename,'.raw','');
-            filename = regexprep(filename,'.xml','');            
-            
-            data = validate_spectra();
+    function load_settings()
         
-            print_now(['Saving...', filename]);
-            save(['input\', filename,'.mat'],'data', 'iTRAQType', 'iTRAQ_masses','SILAC_R6','SILAC_R10','SILAC_K6','SILAC_K8','cont_thresh','cont_window');
-            print_now('');
-            
-            data = {};
-            
-            iTRAQType = {};
-            iTRAQ_masses = [];
+    end
 
-            SILAC = false;
-            SILAC_R6 = false;
-            SILAC_R10 = false;
-            SILAC_K6 = false;
-            SILAC_K8 = false;                        
+    function save_settings()
+        
+    end
+
+    function change_settings(~,~)
+        h2 = figure('pos',[400,400,500,200], 'WindowStyle', 'modal');
+        set(gcf,'name','Settings','numbertitle','off', 'MenuBar', 'none');
+        set(gca,'Visible', 'off', 'Position', [0 0 1 1]);
+        
+        text(10, 150, 'msconvert path:', 'Units', 'pixels');       
+        handle_msconvert = uicontrol('Style','edit','Position',[110 138 300 20],'Enable','on', 'HorizontalAlignment', 'left');
+        uicontrol('Style', 'pushbutton', 'Position', [420 138, 20, 20], 'String', '...', 'Callback', @select_msconvert);
+        
+        function select_msconvert(~,~)
+            [msconvert_filename, msconvert_path] = uigetfile({'*.exe','EXE Files'}, 'msconvert Location', [msconvert_path, msconvert_filename]);
+            set(handle_RAW, 'String', [msconvert_path, msconvert_filename]);
+        end
+        
+    end
+
+% Process multiple files from the same folder. Ensure that RAW and XML are
+% in the same folder with the same name. If scan lists are to be used, they
+% must also be in the same folder with the same names.
+    function batch_process(~,~)
+        
+        [names, path] = uigetfile({'*.raw','RAW Files'}, 'MultiSelect', 'on');
+        
+        if ~isempty(regexp(path, ' '))
+            msgbox('Please choose a RAW file path without spaces.','Warning');
         else
-            for i = 1:length(names)
-                filename = names{i};
+            if strcmp(class(names),'char')
+                % Only one file selected
+                filename = names;
                 filename = regexprep(filename,'.RAW','');
                 filename = regexprep(filename,'.raw','');
                 filename = regexprep(filename,'.xml','');
                 
-                data = validate_spectra();
+                if ~exist([path,filename,'.xml'])
+                    msgbox(['File not found: ',path,filename,'.xml'])
+                else
+                    filename = names;
+                    filename = regexprep(filename,'.RAW','');
+                    filename = regexprep(filename,'.raw','');
+                    filename = regexprep(filename,'.xml','');
+                    
+                    RAW_path = path;
+                    RAW_filename = [filename, '.RAW'];
+                    XML_path = path;
+                    XML_filename = [filename, '.XML'];
+                    SL_path = path;
+                    SL_filename = [filename,'.xls'];
+                    SAVE_path = path;
+                    SAVE_filename = [filename, '.mat'];
+                    validate_spectra();
+                    
+                    if ~isemtpy(data)
+                        print_now(['Saving...', filename]);
+                        %                     save([path, filename,'.mat'],'data', 'iTRAQType', 'iTRAQ_masses','SILAC','SILAC_R6','SILAC_R10','SILAC_K6','SILAC_K8','cont_thresh','cont_window');
+                        save([SAVE_path, SAVE_filename],'data', 'iTRAQType', 'iTRAQ_masses', 'SILAC', 'SILAC_R6','SILAC_R10','SILAC_K6','SILAC_K8','cont_thresh','cont_window','HCD_tol', 'CID_tol', 'OUT_path');
+                        print_now('');
+                    end
+                    
+                    data = {};
+                    
+                    iTRAQType = {};
+                    iTRAQ_masses = [];
+                    
+                    SILAC = false;
+                    SILAC_R6 = false;
+                    SILAC_R10 = false;
+                    SILAC_K6 = false;
+                    SILAC_K8 = false;
+                end                            
+            else
+                % Multiple RAW files selected
                 
-                print_now(['Saving...', filename]);
-                save(['input\', filename,'.mat'],'data', 'iTRAQType', 'iTRAQ_masses','SILAC_R6','SILAC_R10','SILAC_K6','SILAC_K8','cont_thresh','cont_window');
-                print_now('');
-                
-                data = {};
-            
-                iTRAQType = {};
-                iTRAQ_masses = [];
-
-                SILAC = false;
-                SILAC_R6 = false;
-                SILAC_R10 = false;
-                SILAC_K6 = false;
-                SILAC_K8 = false;
+                files_not_found = {};
+                for i = 1:length(names)
+                    filename = names{i};
+                    filename = regexprep(filename,'.RAW','');
+                    filename = regexprep(filename,'.raw','');
+                    filename = regexprep(filename,'.xml','');
+                    
+                    if ~exist([path,filename,'.xml'])
+                       files_not_found{end+1} = [path,filename,'.xml'];
+                    end
+                    
+                end
+                if ~isempty(files_not_found)
+                    error_msg = 'File(s) not found:\n';
+                    for i = 1:length(files_not_found)
+                        error_msg = [error_msg, files_not_found{i}, '\n'];
+                    end
+                    msgbox(error_msg);
+                else
+                    for i = 1:length(names)
+                        filename = names{i};
+                        filename = regexprep(filename,'.RAW','');
+                        filename = regexprep(filename,'.raw','');
+                        filename = regexprep(filename,'.xml','');
+                        
+                        RAW_path = path;
+                        RAW_filename = [filename, '.RAW'];
+                        XML_path = path;
+                        XML_filename = [filename, '.XML'];
+                        SL_path = path;
+                        SL_filename = [filename,'.xls'];
+                        SAVE_path = path;
+                        SAVE_filename = [filename, '.mat'];
+                        if ~isempty(data)
+                            validate_spectra();
+                            
+                            print_now(['Saving...', filename]);
+                        end
+                        %%%%%% Check Saved Parameters %%%%%%%%%%%%%%%%%
+                        % Need to collect and include outpath similar to
+                        save([SAVE_path, SAVE_filename],'data', 'iTRAQType', 'iTRAQ_masses', 'SILAC', 'SILAC_R6','SILAC_R10','SILAC_K6','SILAC_K8','cont_thresh','cont_window','HCD_tol', 'CID_tol', 'OUT_path');
+                        
+%                         save([path, filename,'.mat'],'data', 'iTRAQType', 'iTRAQ_masses','SILAC','SILAC_R6','SILAC_R10','SILAC_K6','SILAC_K8','cont_thresh','cont_window');
+                        
+                        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                        
+                        print_now('');
+                        
+                        data = {};
+                        
+                        iTRAQType = {};
+                        iTRAQ_masses = [];
+                        
+                        SILAC = false;
+                        SILAC_R6 = false;
+                        SILAC_R10 = false;
+                        SILAC_K6 = false;
+                        SILAC_K8 = false;
+                    end
+                end
             end
-        end        
+        end
     end
 
 % Upload file 
-    function upload(~,~)
-        cd('input');
-        [filename, path] = uigetfile({'*.raw','RAW Files'});
-        cd('..');
-        tic;
-        if filename
-            set(handle_file,'Enable', 'off'); 
-            set(handle_file_continue,'Enable', 'off'); 
-            
-            filename = regexprep(filename,'.RAW','');
-            filename = regexprep(filename,'.raw','');
-            filename = regexprep(filename,'.xml','');            
-            
-%             data = validate_spectra(filename);                                   
-            data = validate_spectra();
-            
-            [mtree,jtree] = build_tree(filename, data);
-            set(handle1,'Enable', 'off');
-            set(handle2,'Enable', 'off');
-            set(handle3,'Enable', 'off');
-            set(handle_print_accept,'Enable', 'on');
-            set(handle_print_maybe,'Enable', 'on');
-            set(handle_file_save,'Enable', 'on');
-            set(handle_search, 'Visible', 'on', 'Enable', 'on');
-            set(handle_transfer, 'Visible', 'on', 'Enable', 'on');
-            delete(handle_prec_cont);
-            delete(handle_threshold);
-            delete(handle_scan_number_list);
-            delete(handle_batch_process);
+function upload(~,~)
+    
+    h2 = figure('pos',[400,400,500,200], 'WindowStyle', 'modal'); 
+    set(gcf,'name','File Selection','numbertitle','off', 'MenuBar', 'none');
+    set(gca,'Visible', 'off', 'Position', [0 0 1 1]);
+    
+    text(10, 150, 'RAW File:', 'Units', 'pixels');       
+    handle_RAW = uicontrol('Style','edit','Position',[130 138 290 20],'Enable','on', 'HorizontalAlignment', 'left');
+    uicontrol('Style', 'pushbutton', 'Position', [420 138, 20, 20], 'String', '...', 'Callback', @select_RAW);
+    
+    text(10, 125, 'Mascot XML:', 'Units', 'pixels');                        
+    handle_XML = uicontrol('Style','edit','Position',[130 113 290 20],'Enable','on', 'HorizontalAlignment', 'left');
+    uicontrol('Style', 'pushbutton', 'Position', [420 113, 20, 20], 'String', '...', 'Callback', @select_XML);        
+    
+    text(10, 100, 'Output Directory:', 'Units', 'pixels');                        
+    handle_OUT = uicontrol('Style','edit','Position',[130 88 290 20],'Enable','on', 'HorizontalAlignment', 'left');
+    uicontrol('Style', 'pushbutton', 'Position', [420 88, 20, 20], 'String', '...', 'Callback', @select_OUT);        
+    
+    text(10, 75, 'Scan List (Optional):', 'Units', 'pixels');                        
+    handle_SL = uicontrol('Style','edit','Position',[130 63 290 20],'Enable','on', 'HorizontalAlignment', 'left');
+    uicontrol('Style', 'pushbutton', 'Position', [420 63, 20, 20], 'String', '...', 'Callback', @select_SL);        
+    
+    uicontrol('Style', 'pushbutton', 'Position', [300 33, 100, 20], 'String', 'Process', 'Callback', @process);
+    
+    function select_RAW(~,~)
+        [RAW_filename, RAW_path] = uigetfile({'*.raw','RAW Files'});               
+        if ~isempty(regexp(RAW_path,' '))
+            msgbox('Please choose a RAW file path without spaces.','Warning');
+        elseif ~isempty(regexp(RAW_filename,' '))
+            msgbox('Please choose a RAW file name without spaces.','Warning');
+        else
+            set(handle_RAW, 'String', [RAW_path, RAW_filename]);
         end
-        toc;
     end
+    
+    function select_XML(~,~)
+        [XML_filename, XML_path] = uigetfile({'*.xml','XML Files'});
+        if ~isempty(regexp(XML_path, ' '))
+            msgbox('Please choose a XML file path without spaces.','Warning');
+        elseif ~isempty(regexp(XML_filename, ' '))
+            msgbox('Please choose a RAW file name without spaces.','Warning');
+        else
+            set(handle_XML, 'String', [XML_path, XML_filename]);
+        end
+    end
+    
+    function select_OUT(~,~)
+        OUT_path = uigetdir;
+        OUT_path = [OUT_path,'\'];
+        if ~isempty(regexp(OUT_path, ' '))
+            msgbox('Please choose an output file path without spaces.','Warning');
+        else
+            set(handle_OUT, 'String', OUT_path);
+        end
+    end
+    
+    function select_SL(~,~)
+        [SL_filename, SL_path] = uigetfile({'*.xls;*.xlsx','Excel Files (.xls, .xlsx)'});
+        if ~isempty(regexp(SL_path, ' '))
+            msgbox('Please choose a scan list file path without spaces.','Warning');
+        elseif ~isempty(regexp(SL_filename, ' '))
+            msgbox('Please choose a scan list file name without spaces.','Warning');
+        else
+            set(handle_SL, 'String', [SL_path, SL_filename]);
+        end
+    end
+    
+    function process(~,~)
+        
+        if isempty(RAW_filename)
+            msgbox('No RAW file selected','Warning');
+        elseif isempty(XML_filename)
+            msgbox('No XML file selected','Warning');
+        elseif isempty(OUT_path)
+            msgbox('No output directory selected','Warning');
+        else
+%             RAW_path_ns = scrub_spaces(RAW_path);
+%             XML_path_ns = scrub_spaces(XML_path);
+%             OUT_path_ns = scrub_spaces(OUT_path);
+            
+            close(h2);
+            set(handle_file,'Enable', 'off');
+            set(handle_file_continue,'Enable', 'off');
+            
+            filename = regexprep(RAW_filename,'.RAW','');
+            filename = regexprep(filename,'.raw','');
+            filename = regexprep(filename,'.xml','');
+            
+            CID_tol = str2double(get(handle_CID_tol, 'String'))/1e6;
+            HCD_tol = str2double(get(handle_HCD_tol, 'String'))/1e6;
+            
+            validate_spectra();
+            if ~isempty(data)
+                [mtree,jtree] = build_tree(filename, data);
+                set(handle1,'Enable', 'off');
+                set(handle2,'Enable', 'off');
+                set(handle3,'Enable', 'off');
+                set(handle_print_accept,'Enable', 'on');
+                set(handle_print_maybe,'Enable', 'on');
+                set(handle_file_save,'Enable', 'on');
+                set(handle_search, 'Visible', 'on', 'Enable', 'on');
+%                 set(handle_transfer, 'Visible', 'on', 'Enable', 'on');
+                delete(handle_prec_cont);
+                delete(handle_threshold);                
+                delete(handle_batch_process);
+                
+                delete(handle_CID_tol);
+                delete(handle_HCD_tol);
+            end
+        end
+%         toc;
+    end
+    
+    function out = scrub_spaces(str)
+        prev = 0;
+        a = regexp(str,'\\');
+        
+        keep_name = {};
+        
+        prev = 0;
+        for i = 1:length(a)
+            keep_name{i} = str(prev+1:a(i) - 1);
+            prev = a(i);
+        end
+        
+        for i = 1:length(keep_name)
+            if ~isempty(regexp(keep_name{i},' '))
+                keep_name{i} = ['"', keep_name{i}, '"'] ;
+            end
+        end
+        
+        out = [];
+        for i = 1:length(keep_name)
+            out = [out, keep_name{i}, '\'];
+        end
+    end
+end
 
 % Load Session
     function load_session(~,~)
-        cd('input');
-        [filename, path] = uigetfile({'*.mat','MAT Files'});
-        cd('..');
-        if filename
+
+        [LOAD_filename, LOAD_path] = uigetfile({'*.mat','MAT Files'});
+
+        if exist([LOAD_path,'\',LOAD_filename])
             print_now('Loading...');
             set(handle_file,'Enable', 'off'); 
             set(handle_file_continue,'Enable', 'off'); 
             
-            filename = regexprep(filename,'.mat','');
-            
-%             data = validate_spectra(filename);                                   
-            temp = load(['input\',filename,'.mat']);
+            filename = regexprep(LOAD_filename,'.mat','');
+                                        
+            temp = load([LOAD_path, LOAD_filename]);
             data = temp.data;            
             iTRAQType = temp.iTRAQType;
             iTRAQ_masses = temp.iTRAQ_masses;
+            SILAC = temp.SILAC;
             SILAC_R6 = temp.SILAC_R6;
             SILAC_R10 = temp.SILAC_R10;
             SILAC_K6 = temp.SILAC_K6;
             SILAC_K8 = temp.SILAC_K8;
             cont_thresh = temp.cont_thresh;
             cont_window = temp.cont_window;
+       
+            % Checks if an output directory is selected and if a selected
+            % output directory is valid. If not, requests an output
+            % directory from the user.
+                       
+            if isfield(temp, 'HCD_tol')
+                HCD_tol = temp.HCD_tol;
+            else
+                HCD_tol = 10;
+            end
+            
+            if isfield(temp, 'CID_tol')
+                CID_tol = temp.CID_tol;
+            else
+                CID_tol = 1000;
+            end
             
             % Initialize AA masses based on iTRAQ type
-            init_fragments(iTRAQType{2});
+            init_fragments_TMT(iTRAQType{2});
         
             [mtree,jtree] = build_tree(filename, data);
             set(handle1,'Enable', 'off');
@@ -621,24 +962,56 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
             set(handle_print_maybe,'Enable', 'on');
             set(handle_file_save,'Enable', 'on');
             set(handle_search, 'Visible', 'on', 'Enable', 'on');
-            set(handle_transfer, 'Visible', 'on', 'Enable', 'on');
+%             set(handle_transfer, 'Visible', 'on', 'Enable', 'on');
             print_now('');
             delete(handle_prec_cont);
             delete(handle_threshold);
-            delete(handle_scan_number_list);
+%             delete(handle_scan_number_list);
             delete(handle_batch_process);
             
             if ~strcmp(iTRAQType{1},'None')
                set(ax3,'Visible', 'on'); 
             end
+             if isfield(temp, 'OUT_path') && exist(temp.OUT_path)                
+                OUT_path = temp.OUT_path;
+            else
+                h2 = figure('pos',[400,400,500,200], 'WindowStyle', 'modal');
+                set(gcf,'name','Output Directory','numbertitle','off', 'MenuBar', 'none');
+                set(gca,'Visible', 'off', 'Position', [0 0 1 1]);
+                
+                text(10, 150, 'Please select an output diretory.', 'Units', 'pixels');
+                text(10, 100, 'Output Directory:', 'Units', 'pixels');
+                handle_OUT = uicontrol('Style','edit','Position',[130 88 290 20],'Enable','on', 'HorizontalAlignment', 'left');
+                uicontrol('Style', 'pushbutton', 'Position', [420 88, 20, 20], 'String', '...', 'Callback', @select_OUT);
+                
+                uicontrol('Style', 'pushbutton', 'Position', [300 33, 100, 20], 'String', 'Continue', 'Callback', @proceed);
+            end
+        end
+        
+        function select_OUT(~,~)
+            OUT_path = uigetdir;
+            OUT_path = [OUT_path,'\'];
+            if ~isempty(regexp(OUT_path, ' '))
+                msgbox('Please choose an output file path without spaces.','Warning');
+            else
+                set(handle_OUT, 'String', OUT_path);
+            end
+        end
+        function proceed(~,~)            
+            if isempty(OUT_path)
+                msgbox('No output directory selected','Warning');
+            else
+                close(h2);
+            end
         end
     end
 
 % Save Session
-    function save_session(~,~)
-        SILAC = false;
+    function save_session(~,~)      
+        [SAVE_filename, SAVE_path] = uiputfile({'*.mat','MAT Files'},'Save Session As',[filename,'.mat']);        
+        
         print_now('Saving...');
-        save(['input\', filename,'.mat'],'data', 'iTRAQType', 'iTRAQ_masses','SILAC_R6','SILAC_R10','SILAC_K6','SILAC_K8','cont_thresh','cont_window');
+        save([SAVE_path, SAVE_filename],'data', 'iTRAQType', 'iTRAQ_masses', 'SILAC', 'SILAC_R6','SILAC_R10','SILAC_K6','SILAC_K8','cont_thresh','cont_window','HCD_tol', 'CID_tol', 'OUT_path');
         print_now('');
     end
 
@@ -698,6 +1071,19 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                 mtree.setSelectedNode(node);
                 prev_node = '';
                 close(h2);
+                
+                % Move focus in tree to newly selected scan number
+                jtree.grabFocus;                
+                tree_row = mtree.Tree.getSelectionRows();
+                pause(0.1);
+                mtree.Tree.scrollRowToVisible(tree_row);
+                mtree.expand(node);
+                mtree.collapse(node);
+                mtree.FigureComponent.getHorizontalScrollBar.setValue(0);
+                
+                % Redraw new scan information
+                mousePressedCallback();
+                
             end
             
             function SelectNameCallback(~,~)
@@ -712,9 +1098,19 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                     node = get(node,'NextSibling');
                 end
                 
-                mtree.setSelectedNode(node);
+                mtree.setSelectedNode(node);                
+                
                 prev_node = '';
                 close(h2);
+                
+                % Move focus in tree to newly selection protein
+                jtree.grabFocus;              
+                tree_row = mtree.Tree.getSelectionRows();
+                pause(0.1);
+                mtree.Tree.scrollRowToVisible(tree_row);
+                mtree.expand(node);
+                mtree.collapse(node);
+                mtree.FigureComponent.getHorizontalScrollBar.setValue(0);
                 
                 set(handle1, 'Enable', 'off');
                 set(handle2, 'Enable', 'off');
@@ -786,6 +1182,9 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                                 elseif iTRAQType{2} == 8
                                     iTRAQ = 304.2054 + exact_mass(1,0,0,0,0,0);
                                     K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) + iTRAQ - exact_mass(1,0,0,0,0,0);
+                                elseif iTRAQType{2} == 6 || iTRAQType{2} == 10 %***
+                                    iTRAQ = 229.1629 + exact_mass(1,0,0,0,0,0);  
+                                    K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) + iTRAQ - exact_mass(1,0,0,0,0,0);
                                 else
                                     K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0);
                                 end
@@ -812,7 +1211,7 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                                 temp_peaks = unique(temp_peaks);
                                 
                                 for j = 1:max(size(fragments))
-                                    fragments{j}.validated = compare_spectra(fragments{j}, new_data{i}.scan_data(temp_peaks,:), CID_tol);
+                                    fragments{j}.validated = compare_spectra2(fragments{j}, new_data{i}.scan_data(temp_peaks,:), CID_tol);
                                     fragments{j}.status = 0;
                                 end
                                 new_data{i}.fragments = fragments;
@@ -862,7 +1261,10 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
     end
 
 % Handle mouse click events in uitree
-    function mousePressedCallback(~, ~)
+    function mousePressedCallback(~,~)
+        
+        zoom_is_clicked = 0;
+        
         nodes = mtree.getSelectedNodes;
         node = nodes(1);               
         
@@ -885,6 +1287,7 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                cla(ax1_info);
                cla(ax2);
                if iTRAQType{2} > 0
+     
                    cla(ax3);
                end
                set(ax1, 'TickDir', 'out', 'box', 'off');
@@ -892,6 +1295,7 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                if iTRAQType{2} > 0
                    set(ax3, 'TickDir', 'out', 'box', 'off');
                end
+%-------------------------------------------------------------------------%               
            elseif ~isempty(regexp(node.getValue,'\.'))
                % Particular Peptide Assignment Selected
                set(handle1, 'Enable', 'on');
@@ -906,23 +1310,23 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                if iTRAQType{2} > 0
                    cla(ax3);
                end
-               
+                              
                axes(ax1);
                set(gca, 'TickDir', 'out', 'box', 'off');               
                stem(data{str2num(scan_curr{1})}.scan_data(:,1),data{str2num(scan_curr{1})}.scan_data(:,2),'Marker', 'none');                                                                                                      
                
-               axes(ax1_assign)
+               axes(ax1_assign)                              
                display_ladder(str2num(scan_curr{1}),str2num(scan_curr{2}));
                plot_assignment(str2num(scan_curr{1}),str2num(scan_curr{2}));                                             
                
-               axes(ax1_info)
+               axes(ax1_info)               
                text(0.01, 0.95, ['Scan Number: ', num2str(data{str2num(scan_curr{1})}.scan_number)]);
                
                axes(ax2);
                plot_prec(str2num(scan_curr{1}));
                set(gca, 'TickDir', 'out', 'box', 'off');
                text(.5,1.1,'Precursor', 'HorizontalAlignment', 'center');
-               
+                              
                if iTRAQType{2} > 0
                    axes(ax3);
                    plot_iTRAQ(str2num(scan_curr{1}));
@@ -934,7 +1338,9 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                set(ax2, 'TickDir', 'out', 'box', 'off');               
                if iTRAQType{2} > 0
                    set(ax3, 'TickDir', 'out', 'box', 'off');
-               end
+               end               
+               
+               set(ax1, 'ButtonDownFcn', @zoom_MS2);
 %-------------------------------------------------------------------------%
            else
                % Scan Selected
@@ -979,7 +1385,11 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                    axes(ax1_assign);
                    print_code_now(data{str2num(scan_curr{1})}.code);
                    %%%%%%%%%%%%
-                   set(handle_process_anyway,'Enable','on','Visible','on');                   
+                   % Only allow the option to reprocess if no unsupported
+                   % modifications are found
+                   if isempty(regexp(data{str2num(scan_curr{1})}.code, 'Unsupported Modification')) && isempty(regexp(data{str2num(scan_curr{1})}.code, 'No Possible Sequence'))
+                       set(handle_process_anyway,'Enable','on','Visible','on');
+                   end
                    %%%%%%%%%%%%
                end
            end
@@ -1000,16 +1410,19 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                 
         [r,~] = size(data{scan}.fragments{id}.validated);
         curr_name = get(a,'String');
+        curr_name = curr_name(2:end); % Remove initial space inserted for cosmetic display
         curr_pos = get(a,'Position');
         curr_ion = 0;
         for i = 1:r
             if strcmp(curr_name,data{scan}.fragments{id}.validated(i,2)) && curr_pos(1) == data{scan}.fragments{id}.validated{i,1}
-                curr_ion = i;                
+                curr_ion = i;   
+            elseif strcmp(curr_name,data{scan}.fragments{id}.validated(i,2))
+                1;                
             end
         end
                                 
         h2 = figure('pos',[300,300,500,500], 'WindowStyle', 'modal');        
-        set(gcf,'name','Rename Peak','numbertitle','off', 'MenuBar', 'none');
+        set(gcf,'name','Rename Labeled Peak','numbertitle','off', 'MenuBar', 'none');
         set(gca,'Position', [0,0,1,1], 'Visible', 'off');
         text(.1,.98,['Observed Mass: ', num2str(data{scan}.fragments{id}.validated{curr_ion,1})]);
         text(.1,.94,['Current Label: ', get(a,'String')]);
@@ -1031,6 +1444,7 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
             end
             uicontrol('Style','Radio','String', 'Other:','Parent', rbh, 'Position', [20 400 - r*50 200 20]);            
             handle_other = uicontrol('Style','edit','Position',[50,400-r*50-20,150,20],'Enable','off');
+            uicontrol('Style','Radio','String', 'None','Parent', rbh, 'Position', [20 400 - (r + 1)*50 200 20]);                        
         else
             uicontrol('Style','Radio','String', 'Other:','Parent', rbh, 'Position', [20 400 - r*50 200 20]);            
             handle_other = uicontrol('Style','edit','Position',[50,400-r*50-20,150,20],'Enable','on');
@@ -1057,6 +1471,10 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                         data{scan}.fragments{id}.validated{curr_ion,5} = [];
                     end
                 end
+            elseif strcmp(get(get(rbh,'SelectedObject'),'String'),'None')                
+                data{scan}.fragments{id}.validated{curr_ion,2} = [];
+                data{scan}.fragments{id}.validated{curr_ion,3} = [];
+                data{scan}.fragments{id}.validated{curr_ion,5} = [];
             else
                 name = get(get(rbh,'SelectedObject'),'String');
                 data{scan}.fragments{id}.validated{curr_ion,2} = name;
@@ -1083,7 +1501,8 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
     end
 
 % Read MASCOT output XML file
-    function data = validate_spectra()   
+%     function data = validate_spectra()   
+    function validate_spectra()   
         % Check if precursor contamination exclusion has been activated
         if get(handle_prec_cont,'Value')
             % Get new contamination threshold, default = 100%
@@ -1096,19 +1515,21 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
             end
         end
         
-        if exist(['output\', filename],'dir') == 0
-            mkdir(['output\', filename]);
+        temp_path = [OUT_path, filename];
+        if exist(temp_path,'dir') == 0
+            mkdir(temp_path);
         end
-        print_now(['Reading File: ', filename]);
+        print_now(['Reading File: ', filename]);                
         
-        
-        if exist(['input\', filename, '.xml'])
-            [mods, it_mods, data] = read_mascot_xml(['input\', filename, '.xml']);
-        else
-            [mods, it_mods, data] = read_mascot_xml(['input\', filename, '.txt']);
+        try
+            [mods, it_mods, data] = read_mascot_xml([XML_path,XML_filename]);
+        catch err
+            print_now('');
+            msgbox(['Improperly Formatted XML File:\n ', XML_path, XML_filename],'Warning');
+            return;
         end
         
-        disp(['Size of Data: ', num2str(length(data))]);
+       % disp(['Size of Data: ', num2str(length(data))]);
         
         % Get information about fixed and variable modifications
         C_carb = false;
@@ -1119,22 +1540,52 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         ST_p = false;
         K_ac = false;
         
-        % Include constant modifications
+        % Include constant modifications***
         for i = 1:length(mods)
             if strcmp(mods{i}, 'Carbamidomethyl (C)')
                 C_carb = true;
-            elseif ~isempty(strfind(mods{i}, 'iTRAQ'))
+            elseif ~isempty(strfind(mods{i}, 'iTRAQ')) || ~isempty(strfind(mods{i}, 'TMT'))
                 if strcmp(mods{i},'iTRAQ8plex (K)') || strcmp(mods{i},'iTRAQ8plex (N-term)')
                     iTRAQType = {'Fixed', 8};
-                    iTRAQ_masses = [113.107, 114.11, 115.108, 116.11, 117.11, 118.11, 119.11, 121.12];
+                    iTRAQ_masses = [113.107873,...
+                                    114.111228,...
+                                    115.108263,...
+                                    116.111618,...
+                                    117.114973,...
+                                    118.112008,...
+                                    119.115363,...
+                                    121.122072];
                 elseif strcmp(mods{i},'iTRAQ4plex (K)') || strcmp(mods{i},'iTRAQ4plex (N-term)')
                     iTRAQType = {'Fixed', 4};
-                    iTRAQ_masses = [114.11, 115.108, 116.11, 117.11];
+                    iTRAQ_masses = [114.1106798,...
+                                    115.1077147,...
+                                    116.1110695,...
+                                    117.1144243];
+                 elseif strcmp(mods{i},'TMT10plex (K)') || strcmp(mods{i},'TMT10plex (N-term)')
+                    iTRAQType = {'Fixed',10};
+                    iTRAQ_masses = [126.127726,...
+                                    127.124761,...
+                                    127.131081,...
+                                    128.128116,...
+                                    128.134436,...
+                                    129.131471,...
+                                    129.137790,...
+                                    130.134825,... 
+                                    130.141145,...
+                                    131.138180];
+                elseif strcmp(mods{i},'TMT6plex (K)') || strcmp(mods{i},'TMT6plex (N-term)')
+                    iTRAQType = {'Fixed',6};
+                    iTRAQ_masses = [126.127726,...
+                                    127.124761,...
+                                    128.134436,...
+                                    129.131471,...
+                                    130.141145,...
+                                    131.138180];
                 end
             end
         end
         
-        % Include variable modifications
+        % Include variable modifications***
         for i = 1:length(it_mods)
             if strcmp(it_mods{i}, 'Oxidation (M)')
                 M_Ox = true;
@@ -1147,22 +1598,64 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                 acK = true;
             elseif strcmp(it_mods{i},'iTRAQ8plex (K)') || strcmp(it_mods{i},'iTRAQ8plex (N-term)')
                 iTRAQType = {'Variable', 8};
-                iTRAQ_masses = [113.107, 114.11, 115.108, 116.11, 117.11, 118.11, 119.11, 121.12];
+                iTRAQ_masses = [113.107873,...
+                                    114.111228,...
+                                    115.108263,...
+                                    116.111618,...
+                                    117.114973,...
+                                    118.112008,...
+                                    119.115363,...
+                                    121.122072];
             elseif strcmp(it_mods{i},'iTRAQ4plex (K)') || strcmp(it_mods{i},'iTRAQ4plex (N-term)')
                 iTRAQType = {'Variable', 4};
-                iTRAQ_masses = [114.11, 115.108, 116.11, 117.11];
-            elseif strcmp(it_mods{i},'Arginine-13C6 (R-13C6) (R)')
+                iTRAQ_masses = [114.1106798,...
+                                    115.1077147,...
+                                    116.1110695,...
+                                    117.1144243];
+           elseif strcmp(it_mods{i},'TMT10plex (K)') || strcmp(it_mods{i},'TMT10plex (N-term)')
+                iTRAQType = {'Fixed',10};
+                iTRAQ_masses = [126.127726,...
+                                    127.124761,...
+                                    127.131081,...
+                                    128.128116,...
+                                    128.134436,...
+                                    129.131471,...
+                                    129.137790,...
+                                    130.134825,... 
+                                    130.141145,...
+                                    131.138180];
+            elseif strcmp(it_mods{i},'TMT6plex (K)') || strcmp(it_mods{i},'TMT6plex (N-term)')
+                iTRAQType = {'Fixed',6};
+                iTRAQ_masses = [126.127726,...
+                                    127.124761,...
+                                    128.134436,...
+                                    129.131471,...
+                                    130.141145,...
+                                    131.138180];
+            elseif strcmp(it_mods{i},'Arginine-13C6 (R-13C6) (R)') || strcmp(it_mods{i}, 'SILAC: 13C(6) (R)') || ...
+                    (~isempty(regexp(it_mods{i}, '13C\(6\)')) && ~isempty(regexp(it_mods{i}, '\(R\)')))
                 SILAC = 1;
                 SILAC_R6 = 1;
-            elseif strcmp(it_mods{i},'Arginine-13C615N4 (R-full) (R)')
+            elseif strcmp(it_mods{i},'Arginine-13C615N4 (R-full) (R)') || strcmp(it_mods{i}, 'SILAC: 13C(6)15N(4) (R)') || ...
+                    (~isempty(regexp(it_mods{i}, '13C\(6\)15N\(4\)')) && ~isempty(regexp(it_mods{i}, '\(R\)')))
                 SILAC = 1;
                 SILAC_R10 = 1;
-            elseif strcmp(it_mods{i},'Lysine-13C6 (K-13C6) (K)')
+            elseif strcmp(it_mods{i},'Lysine-13C6 (K-13C6) (K)') || strcmp(it_mods{i}, 'SILAC: 13C(6) (K)') || ...
+                    (~isempty(regexp(it_mods{i}, '13C\(6\)')) && ~isempty(regexp(it_mods{i}, '\(K\)')))
                 SILAC = 1;
                 SILAC_K6 = 1;
-            elseif strcmp(it_mods{i},'Lysine-13C615N2 (K-full) (K)')
+            elseif strcmp(it_mods{i},'Lysine-13C615N2 (K-full) (K)') || strcmp(it_mods{i}, 'SILAC: 13C(6)15N(2) (K)') || ...
+                    (~isempty(regexp(it_mods{i}, '13C\(6\)15N\(2\)')) && ~isempty(regexp(it_mods{i}, '\(K\)')))
                 SILAC = 1;
                 SILAC_K8 = 1;
+            elseif strcmp(it_mods{i},'SILAC: 13C(6)+Acetyl (K)')
+                acK = true;
+                SILAC = 1;
+                SILAC_K6 = 1;
+            elseif strcmp(it_mods{i},'SILAC: 13C(6)15N(2)+Acetyl (K)')
+                acK = true;
+                SILAC = 1;
+                SILAC_K8 = 1;   
             end
         end
         
@@ -1205,63 +1698,68 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         % Remove peptides with too many possible combinations of
         % modifications
         for i = length(data):-1:1
-            [a,~] = size(data{i}.pep_var_mods);
-            pY = 0;
-            pSTY = 0;
-            oM = 0;
-            acK = 0;
-            
-            for j = 1:a
-                if strcmp(data{i}.pep_var_mods{j,2},'Phospho (STY)')
-                    pSTY = pSTY + data{i}.pep_var_mods{j,1};
-                elseif strcmp(data{i}.pep_var_mods{j,2},'Phospho (ST)')
-                    pSTY = pSTY + data{i}.pep_var_mods{j,1};
-                elseif strcmp(data{i}.pep_var_mods{j,2},'Phospho (Y)')
-                    pY = pY + data{i}.pep_var_mods{j,1};
-                elseif strcmp(data{i}.pep_var_mods{j,2},'Oxidation (M)')
-                    oM = oM + data{i}.pep_var_mods{j,1};
-                elseif strcmp(data{i}.pep_var_mods{j,2},'Acetyl (K)')
-                    acK = acK + data{i}.pep_var_mods{j,1};
+            if isfield(data{i}, 'pep_var_mods')
+                [a,~] = size(data{i}.pep_var_mods);
+                pY = 0;
+                pSTY = 0;
+                oM = 0;
+                acK = 0;
+                
+                for j = 1:a
+                    if strcmp(data{i}.pep_var_mods{j,2},'Phospho (STY)')
+                        pSTY = pSTY + data{i}.pep_var_mods{j,1};
+                    elseif strcmp(data{i}.pep_var_mods{j,2},'Phospho (ST)')
+                        pSTY = pSTY + data{i}.pep_var_mods{j,1};
+                    elseif strcmp(data{i}.pep_var_mods{j,2},'Phospho (Y)')
+                        pY = pY + data{i}.pep_var_mods{j,1};
+                    elseif strcmp(data{i}.pep_var_mods{j,2},'Oxidation (M)')
+                        oM = oM + data{i}.pep_var_mods{j,1};
+%                     elseif strcmp(data{i}.pep_var_mods{j,2},'Acetyl (K)')
+%                         acK = acK + data{i}.pep_var_mods{j,1};
+                    end
                 end
-            end
-            
-            pep_seq = data{i}.pep_seq;
-            num_comb = 1;
-            
-            if pY > 0
-                num_comb = num_comb*nchoosek(length(regexp(pep_seq,'Y')),pY);
-            end
-            if pSTY > 0
-                num_comb = num_comb*nchoosek(length(regexp(pep_seq,'[STY]')),pSTY);
-            end
-            if oM > 0
-                num_comb = num_comb*nchoosek(length(regexp(pep_seq,'M')),oM);
-            end
-            data{i}.num_comb = num_comb;
-
-            % Remove if too many combinations
-            if num_comb > 10
-                if ~isfield(data{i},'code')
-                    data{i}.code = ['Too Many Combinations: ', num2str(num_comb)];
-                else
-                    data{i}.code = [data{i}.code, ' + Too Many Combinations: ', num2str(num_comb)];
+                
+                pep_seq = data{i}.pep_seq;
+                num_comb = 1;
+                
+                if pY > 0
+                    num_comb = num_comb*nchoosek(length(regexp(pep_seq,'Y')),pY);
                 end
-                disp('Too Many Combinations');
+                if pSTY > 0
+                    num_comb = num_comb*nchoosek(length(regexp(pep_seq,'[STY]')),pSTY);
+                end
+                if oM > 0
+                    num_comb = num_comb*nchoosek(length(regexp(pep_seq,'M')),oM);
+                end
+                data{i}.num_comb = num_comb;
+                
+                % Remove if too many combinations
+                if num_comb > 10
+                    if ~isfield(data{i},'code')
+                        data{i}.code = ['Too Many Combinations: ', num2str(num_comb)];
+                    else
+                        data{i}.code = [data{i}.code, ' + Too Many Combinations: ', num2str(num_comb)];
+                    end
+                    disp('Too Many Combinations');
+                end
+            else
+                data{i}.num_comb = 1;
             end
         end
         
         disp(['Size of Data: ', num2str(length(data))]);
         %------------------------------------%
         % Initialize AA masses based on iTRAQ type
-        init_fragments(iTRAQType{2});
+        init_fragments_TMT(iTRAQType{2});
         
         % Get scan data from RAW file
-        scans_used = [];        
-        if get(handle_scan_number_list,'Value')            
-            if exist(['input\',filename,'.xlsx'],'file')
+        scans_used = [];
+        if ~isempty(SL_filename)
+            if exist([SL_path,'\',SL_filename])
                 % Read only fron scan input list
-                temp = unique(xlsread(['input\',filename,'.xlsx']));
+                temp = unique(xlsread([SL_path,SL_filename]));
                 
+                total_found = 0;
                 for i = 1:length(temp)
                     j = 1;
                     found = 0;
@@ -1269,10 +1767,13 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                         if temp(i) == data{j}.scan_number
                             data{j}.used = 1;
                             found = 1;
+                            total_found = total_found + 1;
                         end
                         j = j + 1;
-                    end 
+                    end
                 end
+                disp(['Targets Found: ', num2str(total_found), '/', num2str(length(temp))]);
+                
                 for i = length(data):-1:1
                     if ~isfield(data{i},'used')
                         data(i) = [];
@@ -1289,9 +1790,7 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         
         scans_used = unique(scans_used);
                         
-        %%
-        
-        % Get MS2 Data
+        %% Get MS2 Data               
         
         print_now('Getting MS2 Data');
         fid = fopen('config.txt','w');
@@ -1305,9 +1804,21 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         end
         scans = [scans, '"'];
         fwrite(fid,scans);
-        fclose(fid);
+        fclose(fid);                
         
-        system(['ProteoWizard\"ProteoWizard 3.0.4323"\msconvert input\', filename, '.raw -o input\ --mzXML -c config.txt']);
+        % [a,b] = system([msconvert_full_path, ' ', [RAW_path,RAW_filename] , ' -o ', RAW_path, ' --mzXML -c config.txt']);
+        
+%         if a > 0
+%             warndlg(b,'msConvert Error');
+%         end
+%         
+        %mzXML_out = mzxmlread2([RAW_path, filename,'.mzXML']);
+        [a,b] = system(['msconvert ', filename, '.raw -o input\ --mzXML -c config.txt']);
+        
+        if a > 0
+            warndlg(b,'msConvert Error');
+        end
+        
         mzXML_out = mzxmlread2(['input\', filename,'.mzXML']);
         delete('config.txt');
         iTRAQ_scans_used = [];
@@ -1316,9 +1827,10 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         print_now('Storing MS2 Data');
         
         % Transfer MS2 information to data struct
-        for i = length(data):-1:1
+        for i = length(data):-1:1            
             idx = find(scans_used == data{i}.scan_number);
-            if ~isempty(idx)                               
+            if ~isempty(idx)                                     
+                
                 data{i}.activation_method = mzXML_out.scan(idx).precursorMz.activationMethod;
                 data{i}.prec_scan = mzXML_out.scan(idx).precursorMz.precursorScanNum;
                 
@@ -1327,6 +1839,9 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                     prec_scans_used(end+1) = mzXML_out.scan(idx).precursorMz.precursorScanNum;
                     if strcmp(data{i}.activation_method,'CID')
                         data{i}.scan_data = [mzXML_out.scan(idx).peaks.mz(1:2:end),mzXML_out.scan(idx).peaks.mz(2:2:end)];
+                        data{i}.scan_type = 'CID';
+                        
+                        % Record scan number for iTRAQ
                         if ~strcmp(iTRAQType{1},'None')
                             data{i}.iTRAQ_scan = data{i}.scan_number - 1;
                             iTRAQ_scans_used(end+1) = data{i}.scan_number - 1;
@@ -1340,6 +1855,9 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                             temp2 = temp2(idx);
                         end
                         data{i}.scan_data = mspeaks(temp1, temp2);
+                        data{i}.scan_type = 'HCD';
+                        
+                        % Record scan number for iTRAQ
                         if ~strcmp(iTRAQType{1},'None')
                             data{i}.iTRAQ_scan = data{i}.scan_number;
                             iTRAQ_scans_used(end+1) = data{i}.scan_number;
@@ -1364,7 +1882,7 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         end
         
         %-------------------------------------------------------------------------%
-        % Get iTRAQ data
+        %% Get iTRAQ data
         if ~strcmp(iTRAQType{1},'None')
             % iTRAQ Window
             ax3 = axes('Position', [.84,.125,.14,.25], 'TickDir', 'out', 'box', 'off');
@@ -1381,6 +1899,8 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                 fprintf(fid,'filter="mzWindow [113,118]"\n');
             elseif iTRAQType{2} == 8
                 fprintf(fid,'filter="mzWindow [112,122]"\n');
+            elseif (iTRAQType{2} == 10 || iTRAQType{2} == 6) %***
+                fprintf(fid,'filter="mzWindow [125,132]"\n');
             end
             
             fwrite(fid,'filter="scanNumber');
@@ -1392,9 +1912,16 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
             fwrite(fid,scans);
             fclose(fid);
             
-            system(['ProteoWizard\"ProteoWizard 3.0.4323"\msconvert input\', filename, '.raw -o input\ --mzXML -c config.txt']);
             
-            mzXML_out = mzxmlread2(['input\', filename,'.mzXML']);
+        [a,b] = system(['msconvert ', ' ', [RAW_path,RAW_filename] , ' -o ', RAW_path, ' --mzXML -c config.txt']);
+        
+        if a > 0
+            warndlg(b,'msConvert Error');
+        end
+        
+        mzXML_out = mzxmlread2([RAW_path, filename,'.mzXML']);
+%             system(['ProteoWizard\"ProteoWizard 3.0.4323"\msconvert input\', filename, '.raw -o input\ --mzXML -c config.txt']);           
+%             mzXML_out = mzxmlread2(['input\', filename,'.mzXML']);
             delete('config.txt');
             
             print_now('Storing iTRAQ Data');
@@ -1418,9 +1945,9 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
             end
         end
         %-------------------------------------------------------------------------%
-        % Determine SILAC precursor masses
+        %% Determine SILAC precursor masses
         
-        for i = 1:length(data)
+        for i = 1:length(data)                    
             num_k = length(regexp(data{i}.pep_seq,'[Kk]'));
             num_r = length(regexp(data{i}.pep_seq,'[Rr]'));
             temp_prec = [];
@@ -1433,27 +1960,40 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
             k6 = 0;
             k8 = 0;
             
-            [a,~] = size(data{i}.pep_var_mods);
-            for j = 1:a
-                curr_var_mod = data{i}.pep_var_mods{j,2};
-                if strcmp(curr_var_mod,'Phospho (STY)')
-                    pSTY = pSTY + data{i}.pep_var_mods{j,1};
-                elseif strcmp(curr_var_mod,'Phospho (ST)')
-                    pSTY = pSTY + data{i}.pep_var_mods{j,1};
-                elseif strcmp(curr_var_mod,'Phospho (Y)')
-                    pY = pY + data{i}.pep_var_mods{j,1};
-                elseif strcmp(curr_var_mod,'Oxidation (M)')
-                    oM = oM + data{i}.pep_var_mods{j,1};
-                elseif strcmp(curr_var_mod,'Acetyl (K)')
-                    acK = acK + data{i}.pep_var_mods{j,1};
-                elseif strcmp(curr_var_mod,'Arginine-13C6 (R-13C6) (R)')
-                    r6 = data{i}.pep_var_mods{j,1};
-                elseif strcmp(curr_var_mod,'Arginine-13C615N4 (R-full) (R)')
-                    r10 = data{i}.pep_var_mods{j,1};
-                elseif strcmp(curr_var_mod,'Lysine-13C6 (K-13C6) (K)')
-                    k6 = data{i}.pep_var_mods{j,1};
-                elseif strcmp(curr_var_mod,'Lysine-13C615N2 (K-full) (K)')
-                    k8 = data{i}.pep_var_mods{j,1};
+            if isfield(data{i}, 'pep_var_mods')
+                [a,~] = size(data{i}.pep_var_mods);
+                for j = 1:a
+                    curr_var_mod = data{i}.pep_var_mods{j,2};
+                    if strcmp(curr_var_mod,'Phospho (STY)')
+                        pSTY = pSTY + data{i}.pep_var_mods{j,1};
+                    elseif strcmp(curr_var_mod,'Phospho (ST)')
+                        pSTY = pSTY + data{i}.pep_var_mods{j,1};
+                    elseif strcmp(curr_var_mod,'Phospho (Y)')
+                        pY = pY + data{i}.pep_var_mods{j,1};
+                    elseif strcmp(curr_var_mod,'Oxidation (M)')
+                        oM = oM + data{i}.pep_var_mods{j,1};
+                    elseif strcmp(curr_var_mod,'Acetyl (K)')
+                        acK = acK + data{i}.pep_var_mods{j,1};
+                    elseif strcmp(curr_var_mod,'Arginine-13C6 (R-13C6) (R)') || strcmp(curr_var_mod,'SILAC: 13C(6) (R)') || strcmp(curr_var_mod,'Label:13C(6) (R)')
+                        r6 = r6 + data{i}.pep_var_mods{j,1};
+                    elseif strcmp(curr_var_mod,'Arginine-13C615N4 (R-full) (R)') || strcmp(curr_var_mod,'SILAC: 13C(6)15N(4) (R)') || strcmp(curr_var_mod,'Label:13C(6)15N(4) (R)')
+                        r10 = r10 + data{i}.pep_var_mods{j,1};
+                    elseif strcmp(curr_var_mod,'Lysine-13C6 (K-13C6) (K)') || strcmp(curr_var_mod,'SILAC: 13C(6) (K)') || strcmp(curr_var_mod,'Label:13C(6) (K)')
+                        k6 = k6 + data{i}.pep_var_mods{j,1};
+                    elseif strcmp(curr_var_mod,'Lysine-13C615N2 (K-full) (K)') || strcmp(curr_var_mod,'SILAC: 13C(6)15N(2) (K)') || strcmp(curr_var_mod,'Label:13C(6)15N(2) (K)')
+                        k8 = k8 + data{i}.pep_var_mods{j,1};
+                        
+                    elseif strcmp(curr_var_mod,'SILAC: 13C(6)15N(2)+Acetyl (K)')
+                        k8 = k8 + data{i}.pep_var_mods{j,1};
+                        acK = acK + data{i}.pep_var_mods{j,1};
+                    else
+                        if ~isfield(data{i},'code')
+                            data{i}.code = ['Unsupported Modification: ', curr_var_mod];
+                        else
+                            data{i}.code = [data{i}.code, ' + Unsupported Modification: ', curr_var_mod];
+                        end
+                        disp(['Unsupported Modification: ', curr_var_mod]);                        
+                    end
                 end
             end
             data{i}.r6 = r6;
@@ -1481,16 +2021,33 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                     data{i}.code = [data{i}.code, ' + Mixed SILAC'];
                 end
             end
-            temp_prec(1) = data{i}.pep_exp_mz - (r6*exact_mass(6,0,0,0,0,0) + ...
-                r10*exact_mass(10,0,0,0,0,0) + ...
-                k6*exact_mass(6,0,0,0,0,0) + ...
-                k8*exact_mass(8,0,0,0,0,0)) / data{i}.pep_exp_z;
-            temp_prec(2) = temp_prec(1) + (num_r*exact_mass(6,0,0,0,0,0) + num_k*exact_mass(6,0,0,0,0,0))/data{i}.pep_exp_z;
-            temp_prec(3) = temp_prec(1) + (num_r*exact_mass(10,0,0,0,0,0) + num_k*exact_mass(8,0,0,0,0,0))/data{i}.pep_exp_z;
+%             temp_prec(1) = data{i}.pep_exp_mz - (r6*exact_mass(6,0,0,0,0,0) + ...
+%                 r10*exact_mass(10,0,0,0,0,0) + ...
+%                 k6*exact_mass(6,0,0,0,0,0) + ...
+%                 k8*exact_mass(8,0,0,0,0,0)) / data{i}.pep_exp_z;            
+%             temp_prec(2) = temp_prec(1) + (num_r*exact_mass(6,0,0,0,0,0) + num_k*exact_mass(6,0,0,0,0,0))/data{i}.pep_exp_z;
+%             temp_prec(3) = temp_prec(1) + (num_r*exact_mass(10,0,0,0,0,0) + num_k*exact_mass(8,0,0,0,0,0))/data{i}.pep_exp_z;
+            
+            %%%%%% IMPROVED MASS ACCURACY %%%%%%%%%%%%%
+            temp_prec(1) = data{i}.pep_exp_mz - ...
+                (r6 * exact_mass2([0 0],[-6 6],[0 0],[0 0 0],[0 0 0 0],0) + ...
+                 r10 * exact_mass2([0 0],[-6 6],[-4 4],[0 0 0],[0 0 0 0],0) + ...
+                 k6 * exact_mass2([0 0],[-6 6],[0 0],[0 0 0],[0 0 0 0],0) + ...
+                 k8 * exact_mass2([0 0],[-6 6],[-2 2],[0 0 0],[0 0 0 0],0)) / data{i}.pep_exp_z;
+            
+            temp_prec(2) = temp_prec(1) + ...
+                           (num_r * exact_mass2([0 0],[-6 6],[0 0],[0 0 0],[0 0 0 0],0) + ...
+                            num_k * exact_mass2([0 0],[-6 6],[0 0],[0 0 0],[0 0 0 0],0))/data{i}.pep_exp_z;
+                       
+            temp_prec(3) = temp_prec(1) + ...
+                           (num_r * exact_mass2([0 0],[-6 6],[-4 4],[0 0 0],[0 0 0 0],0) + ...
+                            num_k * exact_mass2([0 0],[-6 6],[-2 2],[0 0 0],[0 0 0 0],0))/data{i}.pep_exp_z;
+            %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%            
+            
             data{i}.SILAC_prec = temp_prec;            
         end        
                         
-        % Get Precursor Scan information
+        %% Get Precursor Scan information
         print_now('Getting Precursor Data');
         prec_scans_used = unique(prec_scans_used);
         
@@ -1506,14 +2063,21 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         fwrite(fid,scans);
         fclose(fid);
         
-        system(['ProteoWizard\"ProteoWizard 3.0.4323"\msconvert input\', filename, '.raw -o input\ --mzXML -c config.txt']);
+        [a,b] = system(['msconvert ', ' ', [RAW_path,RAW_filename] , ' -o ', RAW_path, ' --mzXML -c config.txt']);
         
-        mzXML_out = mzxmlread2(['input\', filename,'.mzXML']);
+        if a > 0
+            warndlg(b,'msConvert Error');
+        end
+        
+        mzXML_out = mzxmlread2([RAW_path, filename,'.mzXML']);
+%         system(['ProteoWizard\"ProteoWizard 3.0.4323"\msconvert input\', filename, '.raw -o input\ --mzXML -c config.txt']);        
+%         mzXML_out = mzxmlread2(['input\', filename,'.mzXML']);
         delete('config.txt');
         
         print_now('Storing Precursor Data');
         
         for i = length(data):-1:1
+%             print_now(['Spectra Remaining: ',num2str(i)]);
             idx = find(prec_scans_used == data{i}.prec_scan);
             if ~isempty(idx)
                 % Resolve HCD data
@@ -1551,6 +2115,7 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         %-------------------------------------------------------------------------%
         
         % Remove precursor contaminated scans from validation list
+        print_now('Removing Precursor Contaminated Spectra');
         size(data);
         r1 = 0;
         r2 = 0;
@@ -1618,52 +2183,8 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
             
             % Modify masses of SILAC labeled amino acids for current
             % peptide
-            global R K k;
-            
-            if data{i}.r6 > 0
-                R = exact_mass(14,6,4,2,0,0) - exact_mass(2,0,0,1,0,0) + exact_mass(6,0,0,0,0,0);
-            elseif data{i}.r10 > 0
-                R = exact_mass(14,6,4,2,0,0) - exact_mass(2,0,0,1,0,0) + exact_mass(10,0,0,0,0,0);
-            else
-                R = exact_mass(14,6,4,2,0,0) - exact_mass(2,0,0,1,0,0);
-            end
-            
-            if data{i}.k6 > 0
-                K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) + exact_mass(6,0,0,0,0,0);
-                % Acetyl Lysine
-                k = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) - exact_mass(1,0,0,0,0,0) + exact_mass(3,2,0,1,0,0) + exact_mass(8,0,0,0,0,0);
-            elseif data{i}.k8 > 0
-                K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) + exact_mass(6,0,0,0,0,0);
-                % Acetyl Lysine
-                k = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) - exact_mass(1,0,0,0,0,0) + exact_mass(3,2,0,1,0,0) + exact_mass(8,0,0,0,0,0);
-            else
-                %-----------------------------%
-                var_8plex = 0;
-                var_4plex = 0;
-                
-                curr_var_mods = data{i}.pep_var_mods;
-                [row, col] = size(curr_var_mods);
-                for idx = 1:row
-                    if ~isempty(regexp(curr_var_mods{idx,2},'iTRAQ4plex (K)'))
-                        var_4plex = 1;
-                    elseif ~isempty(regexp(curr_var_mods{idx,2},'iTRAQ8plex (K)'))
-                        var_8plex = 1;
-                    end
-                end
-                %-----------------------------%
-                % Lysine iTRAQ labeled
-                if iTRAQType{2} == 4 || var_4plex
-                    iTRAQ = 144.1021 + exact_mass(1,0,0,0,0,0);                                      
-                    K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) + iTRAQ - exact_mass(1,0,0,0,0,0);
-                elseif iTRAQType{2} == 8 || var_8plex
-                    iTRAQ = 304.2054 + exact_mass(1,0,0,0,0,0);                    
-                    K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) + iTRAQ - exact_mass(1,0,0,0,0,0);
-                else                                        
-                    K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0);
-                end
-                % Acetyl Lysine, not iTRAQ labeled
-                k = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) - exact_mass(1,0,0,0,0,0) + exact_mass(3,2,0,1,0,0);
-            end
+            %             global R K k;
+            set_R_K(i);
             
             pep_seq = data{i}.pep_seq;
             
@@ -1689,42 +2210,41 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                 end
             end
             
-            if ~isfield(data{i},'code')
+            if data{i}.num_comb < 11
                 poss_seq = gen_possible_seq2(pep_seq, data{i}.pY, data{i}.pSTY, data{i}.oM, data{i}.acK);
                 
+                % Consider all ID's with at least one possible sequence
                 if min(size(poss_seq)) > 0 %% && max(size(poss_seq)) < 9
-                    fragments = fragment_masses2(poss_seq, data{i}.pep_exp_z, 0);
                     
-                    
-                    % Include all peaks > 10%
-                    temp = data{i}.scan_data(:,2)/max(data{i}.scan_data(:,2));
-                    temp = find(temp > 0.1);
-                    
-                    % Find peaks that are local maximums in empty regions
-                    for k_idx = 1:length(data{i}.scan_data(:,2))
-                        idx = find(abs(data{i}.scan_data(:,1) - data{i}.scan_data(k_idx,1)) < 25);
-                        if data{i}.scan_data(k_idx,2) == max(data{i}.scan_data(idx,2)) && data{i}.scan_data(k_idx,2)/max(data{i}.scan_data(:,2)) > 0.025
-                            temp = [temp; k_idx];
-                        end
-                    end
-                    temp = unique(temp);
-                    
-                    % Keep if reasonable number of peaks
-                    if length(temp) < 50
+                    % Continue to process all non-excluded IDs
+                    if ~isfield(data{i},'code')
+                        
+                        % Generate fragment masses for all possible sequences
+                        % of modifications
+                        fragments = fragment_masses2(poss_seq, data{i}.pep_exp_z, 0);
+                        
+                        % Include all peaks > 1%, only those >10% will be
+                        % automatically labeled
+                        temp = data{i}.scan_data(:,2)/max(data{i}.scan_data(:,2));
+                        temp = find(temp > 0.01);
+                        
                         for j = 1:max(size(fragments))
-                            fragments{j}.validated = compare_spectra(fragments{j}, data{i}.scan_data(temp,:), CID_tol);
+                            if isfield(data{i}, 'scan_type')
+                                if strcmp(data{i}.scan_type, 'HCD')
+                                    fragments{j}.validated = compare_spectra2(fragments{j}, data{i}.scan_data(temp,:), HCD_tol);
+                                else
+                                    fragments{j}.validated = compare_spectra2(fragments{j}, data{i}.scan_data(temp,:), CID_tol);
+                                end
+                            else
+                                fragments{j}.validated = compare_spectra2(fragments{j}, data{i}.scan_data(temp,:), CID_tol);
+                            end
                             fragments{j}.status = 0;
                         end
                         data{i}.fragments = fragments;
-                    else
-                        if ~isfield(data{i},'code')
-                            data{i}.code = 'Too Many Peaks';
-                        else
-                            data{i}.code = [data{i}.code, ' + Too Many Peaks'];
-                        end
-                        disp('Too Many Peaks');
                     end
                 else
+                    % If no possible sequence of modifications exists, update
+                    % ID-specific codes
                     if ~isfield(data{i}, 'code')
                         data{i}.code = 'No Possible Sequence';
                     else
@@ -1748,52 +2268,7 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
           
         % Modify masses of SILAC labeled amino acids for current
         % peptide
-        global R K k;
-        
-        if data{scan}.r6 > 0
-            R = exact_mass(14,6,4,2,0,0) - exact_mass(2,0,0,1,0,0) + exact_mass(6,0,0,0,0,0);
-        elseif data{scan}.r10 > 0
-            R = exact_mass(14,6,4,2,0,0) - exact_mass(2,0,0,1,0,0) + exact_mass(10,0,0,0,0,0);
-        else
-            R = exact_mass(14,6,4,2,0,0) - exact_mass(2,0,0,1,0,0);
-        end
-        
-        if data{scan}.k6 > 0
-            K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) + exact_mass(6,0,0,0,0,0);
-            % Acetyl Lysine
-            k = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) - exact_mass(1,0,0,0,0,0) + exact_mass(3,2,0,1,0,0) + exact_mass(8,0,0,0,0,0);
-        elseif data{scan}.k8 > 0
-            K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) + exact_mass(6,0,0,0,0,0);
-            % Acetyl Lysine
-            k = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) - exact_mass(1,0,0,0,0,0) + exact_mass(3,2,0,1,0,0) + exact_mass(8,0,0,0,0,0);
-        else
-            %-----------------------------%
-            var_8plex = 0;
-            var_4plex = 0;
-            
-            curr_var_mods = data{scan}.pep_var_mods;
-            [row, col] = size(curr_var_mods);
-            for idx = 1:row
-                if ~isempty(regexp(curr_var_mods{idx,2},'iTRAQ4plex (K)'))
-                    var_4plex = 1;
-                elseif ~isempty(regexp(curr_var_mods{idx,2},'iTRAQ8plex (K)'))
-                    var_8plex = 1;
-                end
-            end
-            %-----------------------------%
-            % Lysine iTRAQ labeled
-            if iTRAQType{2} == 4 || var_4plex
-                iTRAQ = 144.1021 + exact_mass(1,0,0,0,0,0);
-                K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) + iTRAQ - exact_mass(1,0,0,0,0,0);
-            elseif iTRAQType{2} == 8 || var_8plex
-                iTRAQ = 304.2054 + exact_mass(1,0,0,0,0,0);
-                K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) + iTRAQ - exact_mass(1,0,0,0,0,0);
-            else
-                K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0);
-            end
-            % Acetyl Lysine, not iTRAQ labeled
-            k = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) - exact_mass(1,0,0,0,0,0) + exact_mass(3,2,0,1,0,0);
-        end
+        set_R_K(scan);
         
         poss_seq = gen_possible_seq2(data{scan}.pep_seq, data{scan}.pY, data{scan}.pSTY, data{scan}.oM, data{scan}.acK);
         
@@ -1802,32 +2277,37 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
             
             % Include all peaks > 10%
             temp = data{scan}.scan_data(:,2)/max(data{scan}.scan_data(:,2));
-            temp = find(temp > 0.1);
-            
-            % Find peaks that are local maximums in empty regions
-            for k_idx = 1:length(data{scan}.scan_data(:,2))
-                idx = find(abs(data{scan}.scan_data(:,1) - data{scan}.scan_data(k_idx,1)) < 25);
-                if data{scan}.scan_data(k_idx,2) == max(data{scan}.scan_data(idx,2)) && data{scan}.scan_data(k_idx,2)/max(data{scan}.scan_data(:,2)) > 0.025
-                    temp = [temp; k_idx];
-                end
-            end
-            temp = unique(temp);
+            temp = find(temp > 0.01);
             
             for j = 1:max(size(fragments))
-                fragments{j}.validated = compare_spectra(fragments{j}, data{scan}.scan_data(temp,:), CID_tol);
+                if isfield(data{scan}, 'scan_type')
+                    if strcmp(data{scan}.scan_type, 'HCD')
+                        fragments{j}.validated = compare_spectra2(fragments{j}, data{scan}.scan_data(temp,:), HCD_tol);
+                    else
+                        fragments{j}.validated = compare_spectra2(fragments{j}, data{scan}.scan_data(temp,:), CID_tol);
+                    end
+                else
+                    fragments{j}.validated = compare_spectra2(fragments{j}, data{scan}.scan_data(temp,:), CID_tol);
+                end
                 fragments{j}.status = 0;
             end
             data{scan}.fragments = fragments;
+%             
+%             for j = 1:max(size(fragments))
+%                 fragments{j}.validated = compare_spectra(fragments{j}, data{scan}.scan_data(temp,:), CID_tol);
+%                 fragments{j}.status = 0;
+%             end
+%             data{scan}.fragments = fragments;
             data{scan} = rmfield(data{scan},'code');
             
             name = data{scan}.pep_seq;
-            [R,~] = size(data{scan}.pep_var_mods);
+            [ROW,~] = size(data{scan}.pep_var_mods);
             
-            for r = 1:R
-                if data{scan}.pep_var_mods{r,1} == 1
-                    name = [name, ' + ', data{scan}.pep_var_mods{r,2}];
+            for row = 1:ROW
+                if data{scan}.pep_var_mods{row,1} == 1
+                    name = [name, ' + ', data{scan}.pep_var_mods{row,2}];
                 else
-                    name = [name, ' + ', num2str(data{scan}.pep_var_mods{r,1}), ' ', data{scan}.pep_var_mods{r,2}];
+                    name = [name, ' + ', num2str(data{scan}.pep_var_mods{row,1}), ' ', data{scan}.pep_var_mods{row,2}];
                 end
             end
                         
@@ -1840,7 +2320,7 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
             
             for j = 1:length(data{scan}.fragments)                
                 node.add(uitreenode('v0', [num2str(scan),'.',num2str(j)], data{scan}.fragments{j}.seq,  'gray.jpg', true));
-            end            
+            end        
         end        
     end
 
@@ -1848,14 +2328,14 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
     function [mtree, jtree] = build_tree(filename, data)
         print_now('');
         % Root node
-        filename = regexprep(filename,'input\','');
+%         filename = regexprep(filename,'input\','');
         root = uitreenode('v0', 'root', filename, [], false);
         
         prev_prot = '';
         
         num_prot = 1;
         
-        prot = uitreenode('v0', 0, 'temp', [], false);
+        prot = uitreenode('v0', 0, 'temp', [], false);                
         
         for i = 1:length(data)
             if i == 1
@@ -1872,36 +2352,40 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
             end
             
             name = data{i}.pep_seq;
-            [R,~] = size(data{i}.pep_var_mods);
-            
-            for r = 1:R
-                if data{i}.pep_var_mods{r,1} == 1
-                    name = [name, ' + ', data{i}.pep_var_mods{r,2}];
-                else
-                    name = [name, ' + ', num2str(data{i}.pep_var_mods{r,1}), ' ', data{i}.pep_var_mods{r,2}];
+
+            if isfield(data{i}, 'pep_var_mods')
+                [R,~] = size(data{i}.pep_var_mods);
+                
+                for r = 1:R
+                    if data{i}.pep_var_mods{r,1} == 1
+                        name = [name, ' + ', data{i}.pep_var_mods{r,2}];
+                    else
+                        name = [name, ' + ', num2str(data{i}.pep_var_mods{r,1}), ' ', data{i}.pep_var_mods{r,2}];
+                    end
                 end
             end
-                        
+                    
+            
             temp = uitreenode('v0', num2str(i), name, 'white.jpg', false);
             temp.UserData = data{i}.scan_number;
-            if ~isfield(data{i},'code')
+            if ~isfield(data{i},'code')                
                 for j = 1:length(data{i}.fragments)
                     seq = data{i}.fragments{j}.seq;
                     switch data{i}.fragments{j}.status
-                        case 0
-                            temp.add(uitreenode('v0', [num2str(i),'.',num2str(j)], seq,  'gray.jpg', true));
+                        case 0                            
+                            temp.add(uitreenode('v0', [num2str(i),'.',num2str(j)], seq,  'gray.jpg', true));                            
                         case 1
                             temp.add(uitreenode('v0', [num2str(i),'.',num2str(j)], seq,  'green.jpg', true));
                             accept_list{end+1}.scan = num2str(i);
-                            accept_list{end}.choice = num2str(j);
+                            accept_list{end}.choice = num2str(j);                            
                         case 2
                             temp.add(uitreenode('v0', [num2str(i),'.',num2str(j)], seq,  'orange.jpg', true));
                             maybe_list{end+1}.scan = num2str(i);
-                            maybe_list{end}.choice = num2str(j);
+                            maybe_list{end}.choice = num2str(j);                           
                         case 3
                             temp.add(uitreenode('v0', [num2str(i),'.',num2str(j)], seq,  'red.jpg', true));
                             reject_list{end+1}.scan = num2str(i);
-                            reject_list{end}.choice = num2str(j);
+                            reject_list{end}.choice = num2str(j);                            
                     end
                 end
             else
@@ -1930,15 +2414,23 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         jtree = handle(mtree.getTree,'CallbackProperties');
         % MousePressedCallback is not supported by the uitree, but by jtree
         set(jtree, 'MousePressedCallback', @mousePressedCallback);
+        set(jtree, 'KeyPressedCallback', @mousePressedCallback);
     end    
 
 % Displays ladder on gui
-    function display_ladder(scan,id)
-%         axes(ax1_assign);
+    function display_ladder(scan,id)                
         
         [R,C] = size(data{scan}.fragments{id}.validated);
                         
         seq = data{scan}.fragments{id}.seq;
+        
+        
+        b_names_keep = {};
+        y_names_keep = {};
+        
+        b_names_keep{length(seq)} = {};
+        y_names_keep{length(seq)} = {};
+        
 %         b_ions = data{scan}.fragments{id}.b_ions;
 %         y_ions = data{scan}.fragments{id}.y_ions;
         
@@ -1947,12 +2439,16 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         
         for r = 1:R
             if ~isempty(data{scan}.fragments{id}.validated{r,2})
-                if strcmp(data{scan}.fragments{id}.validated{r,2}(1),'a') || strcmp(data{scan}.fragments{id}.validated{r,2}(1),'b')
+                if ~isempty(regexp(data{scan}.fragments{id}.validated{r,2},'a_{')) || ~isempty(regexp(data{scan}.fragments{id}.validated{r,2},'b_{'))
+%                 if strcmp(data{scan}.fragments{id}.validated{r,2}(1),'a') || strcmp(data{scan}.fragments{id}.validated{r,2}(1),'b')
                     [~,~,~,d] = regexp(data{scan}.fragments{id}.validated{r,2},'[0-9]*');
                     b_used(str2num(d{1})) = 1;
-                elseif strcmp(data{scan}.fragments{id}.validated{r,2}(1),'y')
+                    b_names_keep{str2num(d{1})}{end+1} = data{scan}.fragments{id}.validated{r,2};
+                elseif ~isempty(regexp(data{scan}.fragments{id}.validated{r,2},'y_{'))
+%                 elseif strcmp(data{scan}.fragments{id}.validated{r,2}(1),'y_')
                     [~,~,~,d] = regexp(data{scan}.fragments{id}.validated{r,2},'[0-9]*');
                     y_used(str2num(d{1})) = 1;
+                    y_names_keep{str2num(d{1})}{end+1} = data{scan}.fragments{id}.validated{r,2};
                 end
             end
         end
@@ -1974,13 +2470,28 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         
         for i = 2:length(seq)
             if b_used(i-1) == 1 && y_used(end-i+1) == 1
-                text(prev + space_x, y_start, '\color{red}^{\rceil}_{ \lfloor}', 'Units', 'pixels', 'FontSize', 18, 'HorizontalAlignment', 'Center');
+                text(prev + space_x, y_start, '\color{red}^{\rceil}_{ \lfloor}', ...
+                    'Units', 'pixels', ...
+                    'FontSize', 18, ...
+                    'HorizontalAlignment', 'Center', ...
+                    'ButtonDownFcn', {@show_used_ions,i-1, length(seq)-i+1});
             elseif b_used(i-1) == 1 && y_used(end-i+1) == 0
-                text(prev + space_x, y_start, '\color{red}^{\rceil}\color{black}_{ \lfloor}', 'Units', 'pixels', 'FontSize', 18, 'HorizontalAlignment', 'Center');
-            elseif b_used(i-1) == 0 && y_used(end-i+1) == 1
-                text(prev + space_x, y_start, '^{\rceil}\color{red}_{ \lfloor}', 'Units', 'pixels', 'FontSize', 18, 'HorizontalAlignment', 'Center');
+                text(prev + space_x, y_start, '\color{red}^{\rceil}\color{black}_{ \lfloor}', ...
+                    'Units', 'pixels', ...
+                    'FontSize', 18, ...
+                    'HorizontalAlignment', 'Center',...
+                    'ButtonDownFcn', {@show_used_ions, i-1, 0});
+            elseif b_used(i-1) == 0 && y_used(end-i+1) == 1                
+                text(prev + space_x, y_start, '^{\rceil}\color{red}_{ \lfloor}', ...
+                    'Units', 'pixels', ...
+                    'FontSize', 18, ...
+                    'HorizontalAlignment', 'Center',...
+                    'ButtonDownFcn', {@show_used_ions,0, length(seq)-i+1});
             else
-                text(prev + space_x, y_start, '^{\rceil}_{ \lfloor}', 'Units', 'pixels', 'FontSize', 18, 'HorizontalAlignment', 'Center');
+                text(prev + space_x, y_start, '^{\rceil}_{ \lfloor}', ...
+                    'Units', 'pixels', ...
+                    'FontSize', 18, ...
+                    'HorizontalAlignment', 'Center');
             end
             
 %             if i < length(seq)
@@ -1992,12 +2503,30 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         end
     end
 
+% Plot table of fragments used to confirm sequence positions
+    function show_used_ions(~,~,b_pos, y_pos)
+        h2 = figure('pos',[300,300,500,250], 'WindowStyle', 'modal');
+        set(gcf,'name','Show Used Fragments','numbertitle','off', 'MenuBar', 'none');
+        set(gca,'Position', [0,0,1,1], 'Visible', 'off');
+        
+        text(.1,.95,'b-ions', 'FontSize', 16);
+        if b_pos > 0
+            for i = 1:length(b_names_keep{b_pos})
+                text(.12, .90 - i*.1, b_names_keep{b_pos}{i});
+            end
+        end
+        
+        text(.5,.95,'y-ions', 'FontSize', 16);
+        if y_pos > 0            
+            for i = 1:length(y_names_keep{y_pos})
+                text(.52, .90 - i*.1, y_names_keep{y_pos}{i});
+            end
+        end
+    end
+
 % Plot fragment label assignments onto active axes
     function plot_assignment(scan,id)   
-        
-%         data{scan}.scan_data(:,2)
-        
-%         axes(ax1_assign);
+
         hold on;
         plot_isotope = [];
         plot_good = [];
@@ -2005,34 +2534,60 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         plot_miss = [];
         plot_uk = [];
         
+        plot_bt = [];       % Below threshold
+         
         max_y = 0;
+        for i = 1:length(data{scan}.fragments{id}.validated(:,4))
+            if max_y < data{scan}.fragments{id}.validated{i,4}
+                max_y = data{scan}.fragments{id}.validated{i,4};
+            end
+        end
         
         [num_id_peaks_max, ~] = size(data{scan}.fragments{id}.validated);
         
+        x_start = 0.95 * data{scan}.fragments{id}.validated{1,1};
+        x_end = 1.05 * data{scan}.fragments{id}.validated{end,1};
+        
+        x_range = [x_start,x_end];
+        
         for num_id_peaks = 1:num_id_peaks_max
-            x = data{scan}.fragments{id}.validated{num_id_peaks,1};            
-            y = data{scan}.fragments{id}.validated{num_id_peaks,4};
-            max_y = max(y,max_y);
-            name = data{scan}.fragments{id}.validated{num_id_peaks,2};
             
-            if ~isempty(name)
-                if strcmp(name, 'isotope')
-                    plot_isotope(end+1,:) = [x y];
-                elseif strcmp(data{scan}.fragments{id}.validated{num_id_peaks,3},'unknown')
-                    plot_uk(end+1,:) = [x,y];
-                    text(x,y,name,'FontSize', 8, 'Rotation', 90, 'ButtonDownFcn', @labelCallback);
-                else
-                    if data{scan}.fragments{id}.validated{num_id_peaks,5} < CID_tol
-                        plot_good(end+1,:) = [x y];
+            x = data{scan}.fragments{id}.validated{num_id_peaks,1};            
+            if x > x_range(1) && x < x_range(2)
+                y = data{scan}.fragments{id}.validated{num_id_peaks,4};
+                name = data{scan}.fragments{id}.validated{num_id_peaks,2};
+                
+                if ~isempty(name)
+                    if strcmp(name, 'isotope')
+                        plot_isotope(end+1,:) = [x y];
+                    elseif strcmp(data{scan}.fragments{id}.validated{num_id_peaks,3},'unknown')
+                        plot_uk(end+1,:) = [x,y];
+                        text(x,y,[' ', name],'FontSize', 8, 'Rotation', 90, 'ButtonDownFcn', @labelCallback);
                     else
-                        plot_med(end+1,:) = [x y];
+                        if isfield(data{scan}, 'scan_type')
+                            if (strcmp(data{scan}.scan_type, 'CID') && data{scan}.fragments{id}.validated{num_id_peaks,5} < CID_tol) || ...
+                                    (strcmp(data{scan}.scan_type, 'HCD') && data{scan}.fragments{id}.validated{num_id_peaks,5} < HCD_tol)
+                                plot_good(end+1,:) = [x y];
+                            else
+                                plot_med(end+1,:) = [x y];
+                            end
+                        else
+                            if data{scan}.fragments{id}.validated{num_id_peaks,5} < CID_tol
+                                plot_good(end+1,:) = [x y];
+                            else
+                                plot_med(end+1,:) = [x y];
+                            end
+                        end
+                        text(x,y,[' ', name],'FontSize', 8, 'Rotation', 90, 'ButtonDownFcn', @labelCallback);
                     end
-%                     text(x,y,name,'FontSize', 8, 'Rotation', 90);
-                    text(x,y,name,'FontSize', 8, 'Rotation', 90, 'ButtonDownFcn', @labelCallback);
+                else
+                    if y/max_y > 0.1
+                        plot_miss(end+1, :) = [x y];
+                    else
+                        plot_bt(end+1,:) = [x,y];
+                    end
                 end
-            else
-                plot_miss(end+1, :) = [x y];
-            end            
+            end
         end
         
         if ~isempty(plot_good)
@@ -2042,7 +2597,11 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
             plot(plot_med(:,1), plot_med(:,2), '*m');
         end
         if ~isempty(plot_isotope)
-            plot(plot_isotope(:,1), plot_isotope(:,2), '*y');
+%             plot(plot_isotope(:,1), plot_isotope(:,2), '*y');
+            [r,~] = size(plot_isotope);
+            for i = 1:r
+                plot(plot_isotope(i,1), plot_isotope(i,2), '*y', 'ButtonDownFcn', @name_unlabeled);
+            end
         end
         if ~isempty(plot_uk)
             plot(plot_uk(:,1), plot_uk(:,2), '*k');
@@ -2050,17 +2609,23 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         if ~isempty(plot_miss)            
             [r,~] = size(plot_miss);
             for i = 1:r
-                plot(plot_miss(i,1), plot_miss(i,2), 'or', 'ButtonDownFcn', @rename_miss);
+                plot(plot_miss(i,1), plot_miss(i,2), 'or', 'ButtonDownFcn', @name_unlabeled);
             end
         end                
-        
+                
+        if ~isempty(plot_bt)
+            [r,~] = size(plot_bt);
+            for i = 1:r
+                plot(plot_bt(i,1), plot_bt(i,2), 'b.', 'ButtonDownFcn', @name_unlabeled);
+            end
+        end
         
         ylim([0, 1.25*max_y]);
         hold off;
     end
 
-% Rename an unlabeled peak
-    function rename_miss(a,~)
+% Name a peak 
+    function name_unlabeled(a,~)
         nodes = mtree.getSelectedNodes;
         node = nodes(1);
         
@@ -2079,31 +2644,77 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         end
         
         h2 = figure('pos',[300,300,500,500], 'WindowStyle', 'modal');
-        set(gcf,'name','Rename Peak','numbertitle','off', 'MenuBar', 'none');
+        set(gcf,'name','Name Unlabeled Peak','numbertitle','off', 'MenuBar', 'none');
         set(gca,'Position', [0,0,1,1], 'Visible', 'off');
         text(.1,.98,['Observed Mass: ', num2str(data{scan}.fragments{id}.validated{curr_ion,1})]);
         text(.1,.94,'Current Label: None');
         
-        text(50,400,'New Name:','Units','pixels');
-        handle_rename = uicontrol('Style','edit','Position',[50,400-50,150,20],'Enable','on');
-        
-        
-        
+%         text(50,400,'New Name:','Units','pixels');
+%         handle_name_unlabeled = uicontrol('Style','edit','Position',[50,400-50,150,20],'Enable','on');
+                        
         uicontrol('Style', 'pushbutton', 'String', 'OK','Position', [25 10 50 20],'Callback', @OKRenameCallback);
         uicontrol('Style', 'pushbutton', 'String', 'Cancel','Position', [75 10 50 20],'Callback', @CancelRenameCallback);
         
-        function OKRenameCallback(~,~)
-            if ~isempty(get(handle_rename,'String'))
-                data{scan}.fragments{id}.validated{curr_ion,2} = get(handle_rename,'String');
-                data{scan}.fragments{id}.validated{curr_ion,3} = 'unknown';
-                data{scan}.fragments{id}.validated{curr_ion,5} = 'unknown';
+        rbh = uibuttongroup('Position',[0,0,0.5,0.9],'SelectionChangeFcn', @radioCallback);
+        
+        [r,~] = size(data{scan}.fragments{id}.validated{curr_ion,6});
+        text(280,450,'Mass:','Units','pixels');
+        
+        if r > 0
+            for i = 1:r
+                % Show Radio Button with Name                
+                temp_h = uicontrol('Style','Radio','String', data{scan}.fragments{id}.validated{curr_ion,6}{i,1},'Parent', rbh, 'Position', [20 400 - (i-1)*50 150 20]);                
+                % Show Mass                
+                text(280, 410 - (i-1)*50, num2str(data{scan}.fragments{id}.validated{curr_ion,6}{i,3}),'Units','pixels');                
             end
+            uicontrol('Style','Radio','String', 'Other:','Parent', rbh, 'Position', [20 400 - r*50 200 20]);            
+            handle_other = uicontrol('Style','edit','Position',[50,400-r*50-20,150,20],'Enable','off');
+        else
+            uicontrol('Style','Radio','String', 'Other:','Parent', rbh, 'Position', [20 400 - r*50 200 20]);            
+            handle_other = uicontrol('Style','edit','Position',[50,400-r*50-20,150,20],'Enable','on');
+        end
+        
+        function radioCallback(a,~)
+             if strcmp(get(get(a,'SelectedObject'),'String'),'Other:')            
+                 set(handle_other,'Enable','on');
+             else
+                 set(handle_other,'Enable','off');
+             end
+        end
+        
+        function OKRenameCallback(~,~)
+            if strcmp(get(get(rbh,'SelectedObject'),'String'),'Other:')                
+                if ~isempty(get(handle_other,'String'))                    
+                    data{scan}.fragments{id}.validated{curr_ion,2} = get(handle_other,'String');
+                    data{scan}.fragments{id}.validated{curr_ion,3} = 'unknown';
+                    data{scan}.fragments{id}.validated{curr_ion,5} = 'unknown';
+                else
+                    if isempty(data{scan}.fragments{id}.validated{curr_ion,6})                        
+                        data{scan}.fragments{id}.validated{curr_ion,2} = [];
+                        data{scan}.fragments{id}.validated{curr_ion,3} = [];
+                        data{scan}.fragments{id}.validated{curr_ion,5} = [];
+                    end
+                end
+            else
+                name = get(get(rbh,'SelectedObject'),'String');
+                data{scan}.fragments{id}.validated{curr_ion,2} = name;
+                
+                [r,~] = size(data{scan}.fragments{id}.validated{curr_ion,6});
+                chosen_id = 0;
+                for i = 1:r
+                    if strcmp(data{scan}.fragments{id}.validated{curr_ion,6}{i,1},name)
+                        chosen_id = i;
+                    end
+                end                                
+                data{scan}.fragments{id}.validated{curr_ion,3} = data{scan}.fragments{id}.validated{curr_ion,6}{chosen_id,3};
+                data{scan}.fragments{id}.validated{curr_ion,5} = abs(data{scan}.fragments{id}.validated{curr_ion,6}{chosen_id,3}-data{scan}.fragments{id}.validated{curr_ion,1})/data{scan}.fragments{id}.validated{curr_ion,6}{chosen_id,3};
+            end          
             cla(ax1_assign);
             axes(ax1_assign);
             display_ladder(scan,id);
             plot_assignment(scan,id);            
             close(h2);
-        end
+        end        
         
         function CancelRenameCallback(~,~)
             close(h2);
@@ -2113,7 +2724,7 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
 % Plot iTRAQ region data onto active axes
     function plot_iTRAQ(scan)  
 %         axes(ax3);
-        title('iTRAQ');
+        title('iTRAQ/TMT');
         hold on;
         if ~isempty(data{scan}.iTRAQ_scan_data)
             mz = data{scan}.iTRAQ_scan_data(:,1);
@@ -2128,13 +2739,15 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         if iTRAQType{2} == 8            
             xlim([112,122]);            
         elseif iTRAQType{2} == 4            
-            xlim([113,118]);            
+            xlim([113,118]);
+        elseif (iTRAQType{2} == 6 || iTRAQType{2} == 10) %***
+            xlim([125 132])
         end                                
         
         for i = 1:length(iTRAQ_masses)
            idx2 = [];
            val_int = [];
-            idx = find(abs(mz-iTRAQ_masses(i)) < 0.01);            
+            idx = find(abs(mz-iTRAQ_masses(i)) < 0.005); %*** Changed for doublets           
             [val_int,idx2] = max(int(idx));
                                     
             if ~isempty(idx2)
@@ -2148,25 +2761,37 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
     function plot_prec(scan)       
         
         title('Precursor');
-        hold on;
-        mz = data{scan}.prec_scan_data(:,1);
-        int = data{scan}.prec_scan_data(:,2);
+        hold on;                                
         
         prec = data{scan}.pep_exp_mz;
+            
+        if isfield(data{scan}, 'prec_scan_data')
+            mz = data{scan}.prec_scan_data(:,1);
+            int = data{scan}.prec_scan_data(:,2);
         
-        ylim([0,1.1*max(int)]);
+            scale = 1.1 * max(int);                        
+        else
+            mz = [];
+            int = [];
+            
+            scale = 1;                        
+        end
+        ylim([0,scale]);
+        
         if ~SILAC
             xlim([prec-2,prec+2]);
         else
             xlim([data{scan}.SILAC_prec(1) - 2,data{scan}.SILAC_prec(3) + 2]);
         end
         
+        % Lightly highlight all SILAC precursor peaks
         if SILAC
             for i = 1:length(data{scan}.SILAC_prec)                
-                area([data{scan}.SILAC_prec(i)-cont_window,data{scan}.SILAC_prec(i)+cont_window],[1.1*max(int),1.1*max(int)],'FaceColor', [.95,.95,.95],'LineStyle','none');
-            end
+                area([data{scan}.SILAC_prec(i)-cont_window,data{scan}.SILAC_prec(i)+cont_window],[scale,scale],'FaceColor', [.95,.95,.95],'LineStyle','none');
+            end            
         end
-        area([prec-cont_window,prec+cont_window],[1.1*max(int),1.1*max(int)],'FaceColor', [.75,.75,.75],'LineStyle','none');
+        % Darkly highlight fragmented SILAC precursor peak
+        area([prec-cont_window,prec+cont_window],[scale,scale],'FaceColor', [.75,.75,.75],'LineStyle','none');
         
         step = 1/data{scan}.pep_exp_z;
                                 
@@ -2178,14 +2803,19 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
                  ion_series = [ion_series, data{scan}.SILAC_prec(i)-5*step:step:data{scan}.SILAC_prec(i)+5*step];
             end
         end
-        
-        stem(mz,int, 'Marker', 'none');
-        for i = 1:length(ion_series)
-            [diff,idx] = min(abs(ion_series(i)-mz));
-            if diff < 0.05 && int(idx)/max(int) > 0.1
-                plot(mz(idx), int(idx), '*g');
-            end
+                        
+        if ~isempty(mz)
+            stem(mz,int, 'Marker', 'none');
+            for i = 1:length(ion_series)
+                [diff,idx] = min(abs(ion_series(i)-mz));
+                if diff < 0.05 && int(idx)/max(int) > 0.1
+                    plot(mz(idx), int(idx), '*g');
+                end
+            end                    
         end
+        
+        
+        
         hold off;
     end
 
@@ -2206,10 +2836,10 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         [R,~] = size(data{scan}.fragments{id}.validated);
         for r = 1:R
             if ~isempty(data{scan}.fragments{id}.validated{r,2})
-                if strcmp(data{scan}.fragments{id}.validated{r,2}(1),'a') || strcmp(data{scan}.fragments{id}.validated{r,2}(1),'b')
+                if ~isempty(regexp(data{scan}.fragments{id}.validated{r,2},'a_{')) || ~isempty(regexp(data{scan}.fragments{id}.validated{r,2},'b_{'))
                     [~,~,~,d] = regexp(data{scan}.fragments{id}.validated{r,2},'[0-9]*');
                     b_used(str2num(d{1})) = 1;
-                elseif strcmp(data{scan}.fragments{id}.validated{r,2}(1),'y')
+                elseif ~isempty(regexp(data{scan}.fragments{id}.validated{r,2},'y_{'))
                     [~,~,~,d] = regexp(data{scan}.fragments{id}.validated{r,2},'[0-9]*');
                     y_used(str2num(d{1})) = 1;
                 end
@@ -2222,7 +2852,13 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         text(-40, 665, protein, 'Units', 'pixels', 'FontSize', 10);
         text(-40, 650, ['Charge State: +', num2str(charge_state)], 'Units', 'pixels', 'FontSize', 10);
         text(-40, 635, ['Scan Number: ', num2str(scan_number)], 'Units', 'pixels', 'FontSize', 10);
-        text(-40, 620, ['File Name: ', filename, '.raw'], 'Units', 'pixels', 'FontSize', 10, 'Interpreter', 'none');
+        
+        if isempty(RAW_filename)            
+            text(-40, 620, ['File Name: ', filename, '.RAW'], 'Units', 'pixels', 'FontSize', 10, 'Interpreter', 'none');
+        else
+            text(-40, 620, ['File Name: ', RAW_filename], 'Units', 'pixels', 'FontSize', 10, 'Interpreter', 'none');
+        end
+%         text(-40, 620, ['File Name: ', filename, '.raw'], 'Units', 'pixels', 'FontSize', 10, 'Interpreter', 'none');
         
         x_start = -40;
         y_start = 700;
@@ -2264,15 +2900,16 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         
       
         axes(ax1_pdf);        
-        stem(data{scan}.scan_data(:,1),data{scan}.scan_data(:,2),'Marker', 'none');                
-        plot_assignment(scan,id);
-        set(gca, 'TickDir', 'out', 'box', 'off');        
         ylim([0,1.25*max(data{scan}.scan_data(:,2))]);
         
         x_start = 0.95 * data{scan}.fragments{id}.validated{1,1};
         x_end = 1.05 * data{scan}.fragments{id}.validated{end,1};
-        
         xlim([x_start,x_end]);
+        
+        stem(data{scan}.scan_data(:,1),data{scan}.scan_data(:,2),'Marker', 'none');                
+        plot_assignment(scan,id);
+        set(gca, 'TickDir', 'out', 'box', 'off');        
+        
         
         axes(ax2_pdf);
         plot_prec(scan);
@@ -2280,7 +2917,7 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
 %         text(.5,1.1,'Precursor', 'HorizontalAlignment', 'center');
         if ~strcmp(iTRAQType{1},'None')
             ax3_pdf = axes('Position', [.75,.125,.14,.25], 'TickDir', 'out', 'box', 'off');
-            title('iTRAQ');
+            title('iTRAQ/TMT');
             
             axes(ax3_pdf);
             plot_iTRAQ(scan);
@@ -2306,14 +2943,18 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         filename_temp = regexprep(filename_temp,'\|','');
         filename_temp = regexprep(filename_temp,'?','');
         filename_temp = regexprep(filename_temp,'*','');
+                
+        print(fig,'-dpdf', '-r900', [OUT_path, filename, '\', filename_temp]);
         
-        print(fig,'-dpdf', '-r900', ['output\', filename, '\', filename_temp]);
         close(fig);
     end
 
 % Write XLS file with iTRAQ data for scans in "accept" list
     function iTRAQ_to_Excel()
-        XLS_out = fopen(['output\', filename, '\', filename, '.xls'],'w');        
+%         XLS_out = fopen([OUT_path, filename, '\', filename, '.xls'],'w');   
+        [iTRAQ_filename, iTRAQ_path] = uiputfile({'*.xls','XLS Files'},'Save iTRAQ Summary',[OUT_path, filename, '\', filename, '.xls']);
+        XLS_out = fopen([iTRAQ_path, iTRAQ_filename],'w');   
+
         title_line = ['Scan\t', 'Protein\t', 'Accession\t', 'Sequence\t', 'iTRAQ Centroided\n'];
         fprintf(XLS_out, title_line);
         
@@ -2335,7 +2976,7 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
             for j = 1:length(iTRAQ_masses)
                 idx2 = [];
                 val_int = [];
-                idx = find(abs(mz-iTRAQ_masses(j)) < 0.01);
+                idx = find(abs(mz-iTRAQ_masses(j)) < 0.005); %*** Changed to account for doublets
                 [val_int,idx2] = max(int(idx));
                 
                 if ~isempty(idx2)
@@ -2352,7 +2993,11 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
 
 % Write XLS file with SILAC data for scans in "accept" list
     function SILAC_to_Excel()
-        XLS_out = fopen(['output\', filename, '\', filename, '.xls'],'w');        
+%         XLS_out = fopen([OUT_path, filename, '\', filename, '.xls'],'w');        
+        
+        [SILAC_filename, SILAC_path] = uiputfile({'*.xls','XLS Files'},'Save SILAC Summary',[OUT_path, filename, '\', filename,' .xls']);
+        XLS_out = fopen([SILAC_path, SILAC_filename],'w');   
+        
         title_line = ['Scan\t', 'Protein\t', 'Accession\t', 'Sequence\t', 'SILAC Centroided\n'];
         fprintf(XLS_out, title_line);
         
@@ -2370,7 +3015,7 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
             for j = 1:length(prec)
                 idx2 = [];
                 val_int = [];
-                idx = find(abs(mz-prec(j)) < 0.05);
+                idx = find(abs(mz-prec(j)) < 0.25);
                 [val_int,idx2] = max(int(idx));
                 
                 if ~isempty(idx2)
@@ -2384,4 +3029,67 @@ text(80,470, '+/- m/z', 'Units', 'pixels', 'Interpreter', 'none');
         end
         fclose(XLS_out);
     end
+
+% Set masses of Arginine and Lysine based on SILAC and iTRAQ
+    function set_R_K(scan)
+        global R K k;        
+        
+        % Set mass of Arginine (R)
+        if data{scan}.r6 > 0
+            R = exact_mass(14,6,4,2,0,0) - exact_mass(2,0,0,1,0,0) + exact_mass2([0 0],[-6 6],[0 0],[0 0 0],[0 0 0 0],0);
+        elseif data{scan}.r10 > 0
+            R = exact_mass(14,6,4,2,0,0) - exact_mass(2,0,0,1,0,0) + exact_mass2([0 0],[-6 6],[-4 4],[0 0 0],[0 0 0 0],0);
+        else
+            R = exact_mass(14,6,4,2,0,0) - exact_mass(2,0,0,1,0,0);
+        end
+        
+        % Set mass of Lysine (K)
+        if data{scan}.k6 > 0
+            K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) + exact_mass2([0 0],[-6 6],[0 0],[0 0 0],[0 0 0 0],0);
+            % Acetyl Lysine
+            k = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) - exact_mass(1,0,0,0,0,0) + exact_mass(3,2,0,1,0,0) + exact_mass2([0 0],[-6 6],[0 0],[0 0 0],[0 0 0 0],0);
+        elseif data{scan}.k8 > 0
+            K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) + exact_mass2([0 0],[-6 6],[-2 2],[0 0 0],[0 0 0 0],0);
+            % Acetyl Lysine
+            k = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) - exact_mass(1,0,0,0,0,0) + exact_mass(3,2,0,1,0,0) + exact_mass2([0 0],[-6 6],[-2 2],[0 0 0],[0 0 0 0],0);
+        else
+            %-----------------------------%
+            var_8plex = 0;
+            var_4plex = 0;
+            var_6plex = 0;
+            var_10plex = 0;
+            
+            if isfield(data{scan}, 'pep_var_mods')
+                curr_var_mods = data{scan}.pep_var_mods;
+                [row, col] = size(curr_var_mods);
+                for idx = 1:row
+                    if ~isempty(regexp(curr_var_mods{idx,2},'iTRAQ4plex (K)'))
+                        var_4plex = 1;
+                    elseif ~isempty(regexp(curr_var_mods{idx,2},'iTRAQ8plex (K)'))
+                        var_8plex = 1;
+                    elseif ~isempty(regexp(curr_var_mods{idx,2},'TMT10plex (K)')) %***
+                        var_10plex = 1;
+                    elseif ~isempty(regexp(curr_var_mods{idx,2},'TMT6plex (K)'))  %***
+                        var_6plex = 1;
+                    end
+                end
+            end
+            %-----------------------------%
+            % Lysine iTRAQ labeled
+            if iTRAQType{2} == 4 || var_4plex
+                iTRAQ = 144.1021 + exact_mass(1,0,0,0,0,0);
+                K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) + iTRAQ - exact_mass(1,0,0,0,0,0);
+            elseif iTRAQType{2} == 8 || var_8plex
+                iTRAQ = 304.2054 + exact_mass(1,0,0,0,0,0);
+                K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) + iTRAQ - exact_mass(1,0,0,0,0,0);
+             elseif ((iTRAQType{2} == 10 || var_10plex) || (iTRAQType{2} == 6 || var_6plex))  %***
+                iTRAQ = 229.1629 + exact_mass(1,0,0,0,0,0);  
+                K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) + iTRAQ - exact_mass(1,0,0,0,0,0);
+            else
+                K = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0);
+            end
+            % Acetyl Lysine, not iTRAQ labeled
+            k = exact_mass(14,6,2,2,0,0) - exact_mass(2,0,0,1,0,0) - exact_mass(1,0,0,0,0,0) + exact_mass(3,2,0,1,0,0);
+        end
+    end   
 end
